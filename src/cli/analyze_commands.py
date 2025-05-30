@@ -13,6 +13,18 @@ from storage.database import BlockchainDatabase
 from analysis.state_dependency_analyzer import StateDependencyAnalyzer
 from visualization.dependency_graph import DependencyGraphVisualizer
 
+# Import parallelization analysis modules
+try:
+    from analysis.parallelization_simulator import (
+        ParallelizationSimulator, ParallelizationStrategy
+    )
+    from visualization.parallelization_comparison import ParallelizationComparisonVisualizer
+    from core.transaction_fetcher import TransactionData
+    from analysis.state_dependency_analyzer import StateDependency
+    PARALLELIZATION_AVAILABLE = True
+except ImportError:
+    PARALLELIZATION_AVAILABLE = False
+
 
 def handle_analyze(args):
     """Handle all analyze subcommands."""
@@ -26,6 +38,41 @@ def handle_analyze(args):
         return analyze_continuous_data(args.blocks)
     elif args.analyze_cmd == 'chain':
         return analyze_dependency_chain(args.block, args.longest)
+    elif args.analyze_cmd == 'parallelization':
+        return analyze_parallelization(args.block, args.threads, args.strategies, 
+                                      args.multi_block, args.aggregate, args.output_dir)
+    elif args.analyze_cmd == 'aggregate':
+        if not PARALLELIZATION_AVAILABLE:
+            print("❌ Parallelization analysis modules not available")
+            return 1
+            
+        # Parse thread counts
+        try:
+            thread_counts = [int(t.strip()) for t in args.thread_counts.split(',')]
+        except (ValueError, AttributeError):
+            print(f"❌ Invalid thread count format: {getattr(args, 'thread_counts', 'None')}")
+            return 1
+        
+        # Parse strategies
+        strategy_map = {
+            'sequential': ParallelizationStrategy.SEQUENTIAL,
+            'dependency-aware': ParallelizationStrategy.DEPENDENCY_AWARE
+        }
+        
+        if args.strategies == 'all':
+            strategies = list(strategy_map.values())
+        else:
+            strategy_names = [s.strip() for s in args.strategies.split(',')]
+            strategies = []
+            for name in strategy_names:
+                if name in strategy_map:
+                    strategies.append(strategy_map[name])
+                else:
+                    print(f"❌ Unknown strategy: {name}")
+                    print(f"   Available: {', '.join(strategy_map.keys())}")
+                    return 1
+        
+        return analyze_parallelization_aggregate(thread_counts, strategies, args.output_dir)
     else:
         print("❌ No analyze operation specified. Use --help for options.")
         return 1
@@ -1090,3 +1137,291 @@ def create_performance_overview(stats, df):
     )
     
     return fig 
+
+
+def analyze_parallelization(block_number=None, threads_str='1,2,4,8,16,32', 
+                          strategies='all', multi_block=False, aggregate=False, output_dir='./data/graphs'):
+    """
+    Analyze parallelization strategies and thread count performance.
+    
+    Args:
+        block_number: Specific block to analyze (default: auto-select recent block)
+        threads_str: Comma-separated thread counts to test
+        strategies: Parallelization strategies to compare ('all' or specific)
+        multi_block: Whether to run multi-block validation analysis
+        aggregate: Whether to run aggregate analysis
+        output_dir: Directory to save visualization outputs
+    """
+    print("🚀 Starting Parallelization Analysis...")
+    
+    if not PARALLELIZATION_AVAILABLE:
+        print("❌ Parallelization analysis modules not available")
+        print("   Please ensure all required dependencies are installed")
+        return 1
+    
+    try:
+        # Initialize components
+        database = BlockchainDatabase()
+        simulator = ParallelizationSimulator()
+        visualizer = ParallelizationComparisonVisualizer(output_dir=output_dir)
+        
+        # Parse thread counts
+        try:
+            thread_counts = [int(t.strip()) for t in threads_str.split(',')]
+            thread_counts = sorted(set(thread_counts))  # Remove duplicates and sort
+        except ValueError:
+            print(f"❌ Invalid thread count format: {threads_str}")
+            print("   Expected format: 1,2,4,8,16,32")
+            return 1
+        
+        # Parse strategies
+        strategy_map = {
+            'sequential': ParallelizationStrategy.SEQUENTIAL,
+            'dependency-aware': ParallelizationStrategy.DEPENDENCY_AWARE
+        }
+        
+        if strategies == 'all':
+            selected_strategies = list(strategy_map.values())
+        else:
+            strategy_names = [s.strip() for s in strategies.split(',')]
+            selected_strategies = []
+            for name in strategy_names:
+                if name in strategy_map:
+                    selected_strategies.append(strategy_map[name])
+                else:
+                    print(f"❌ Unknown strategy: {name}")
+                    print(f"   Available: {', '.join(strategy_map.keys())}")
+                    return 1
+        
+        # Select block for analysis
+        if block_number is None:
+            print("🔍 Auto-selecting recent block with good transaction count...")
+            stats = database.get_database_stats()
+            max_block = stats['block_range']['max']
+            
+            # Look for a block with 100+ transactions in the last 20 blocks
+            for i in range(20):
+                candidate_block = max_block - i
+                block_data = database.get_block(candidate_block)
+                if block_data and block_data['transaction_count'] >= 100:
+                    block_number = candidate_block
+                    break
+            
+            if block_number is None:
+                # Fallback to the latest block
+                block_number = max_block
+                print(f"⚠️  Using latest block {block_number} (may have fewer transactions)")
+            else:
+                print(f"✅ Selected block {block_number} ({block_data['transaction_count']} transactions)")
+        
+        # Load block data
+        print(f"📊 Loading block {block_number} data...")
+        transactions_raw = database.get_transactions_by_block(block_number)
+        dependencies_raw = database.get_dependencies_for_block(block_number)
+        
+        if not transactions_raw:
+            print(f"❌ No transactions found for block {block_number}")
+            return 1
+        
+        print(f"   📦 Loaded {len(transactions_raw)} transactions")
+        print(f"   🔗 Loaded {len(dependencies_raw)} dependencies")
+        
+        # Convert to objects
+        transactions = _convert_transactions(transactions_raw)
+        dependencies = _convert_dependencies(dependencies_raw)
+        
+        if multi_block:
+            print("🔄 Running multi-block validation analysis...")
+            html_path = visualizer.create_multi_block_analysis(
+                database, 
+                thread_counts=thread_counts,
+                strategies=selected_strategies
+            )
+            print(f"✅ Multi-block analysis saved to: {html_path}")
+        elif aggregate:
+            print("📊 Running aggregate statistical analysis...")
+            html_path = visualizer.create_aggregate_statistics_plot(
+                database,
+                thread_counts=thread_counts,
+                strategies=selected_strategies,
+                min_blocks=10
+            )
+            print(f"✅ Aggregate statistics saved to: {html_path}")
+        else:
+            # Run single-block analysis
+            print(f"⚡ Analyzing {len(selected_strategies)} strategies across {len(thread_counts)} thread counts...")
+            
+            analysis = simulator.analyze_thread_count_performance(
+                transactions, dependencies, block_number, thread_counts, selected_strategies
+            )
+            
+            # Generate visualizations
+            print("📊 Generating visualizations...")
+            
+            # Research focus plot (primary output)
+            research_path = visualizer.create_research_focus_plot(analysis, selected_strategies)
+            print(f"✅ Research plot saved to: {research_path}")
+            
+            # Comprehensive comparison
+            comparison_path = visualizer.create_thread_count_comparison(analysis)
+            print(f"✅ Comprehensive analysis saved to: {comparison_path}")
+            
+            # Display key results
+            print("\n📈 KEY RESULTS:")
+            print(f"   📦 Block {block_number}: {analysis.transaction_count:,} transactions, {analysis.dependency_count} dependencies")
+            
+            best_strategies = {}
+            for thread_count in [1, 4, 8, 16, 32]:
+                if thread_count in thread_counts and thread_count in analysis.best_strategy_per_thread_count:
+                    best_strategy = analysis.best_strategy_per_thread_count[thread_count]
+                    strategy_analysis = analysis.strategy_analyses[best_strategy]
+                    
+                    idx = strategy_analysis.thread_counts.index(thread_count)
+                    speedup = strategy_analysis.speedup_values[idx]
+                    max_gas = strategy_analysis.bottleneck_gas_values[idx] / 1_000_000
+                    
+                    strategy_name = best_strategy.value.replace('_', ' ').title()
+                    print(f"   ⚡ {thread_count:2d} threads: {strategy_name:<20} ({speedup:5.2f}x speedup, {max_gas:6.1f}M max gas)")
+            
+            # Find overall best performance
+            best_overall = max(analysis.best_strategy_per_thread_count.items(), 
+                             key=lambda x: analysis.strategy_analyses[x[1]].speedup_values[
+                                 analysis.strategy_analyses[x[1]].thread_counts.index(x[0])
+                             ])
+            best_thread_count, best_strategy = best_overall
+            best_strategy_analysis = analysis.strategy_analyses[best_strategy]
+            idx = best_strategy_analysis.thread_counts.index(best_thread_count)
+            best_speedup = best_strategy_analysis.speedup_values[idx]
+            
+            print(f"\n🏆 OPTIMAL CONFIGURATION:")
+            print(f"   Strategy: {best_strategy.value.replace('_', ' ').title()}")
+            print(f"   Threads: {best_thread_count}")
+            print(f"   Speedup: {best_speedup:.2f}x")
+            print(f"   Max Gas: {best_strategy_analysis.bottleneck_gas_values[idx] / 1_000_000:.1f}M")
+        
+        print(f"\n🎯 Analysis complete! Visualizations saved to: {output_dir}")
+        return 0
+        
+    except Exception as e:
+        print(f"❌ Error in parallelization analysis: {e}")
+        import traceback
+        traceback.print_exc()
+        return 1
+
+
+def _convert_transactions(transactions_raw):
+    """Convert database transaction data to TransactionData objects."""
+    transactions = []
+    for tx_data in transactions_raw:
+        transactions.append(TransactionData(
+            hash=tx_data['hash'],
+            block_number=tx_data['block_number'], 
+            transaction_index=tx_data['transaction_index'],
+            from_address=tx_data['from_address'],
+            to_address=tx_data['to_address'],
+            value=tx_data['value'],
+            gas=tx_data['gas'],
+            gas_price=tx_data['gas_price'],
+            gas_used=tx_data.get('gas_used', tx_data['gas']),
+            status=tx_data.get('status'),
+            input_data=tx_data.get('input_data'),
+            logs=tx_data.get('logs')
+        ))
+    return transactions
+
+
+def _convert_dependencies(dependencies_raw):
+    """Convert database dependency data to StateDependency objects."""
+    dependencies = []
+    for dep_data in dependencies_raw:
+        dependencies.append(StateDependency(
+            dependent_tx_hash=dep_data['dependent_tx_hash'],
+            dependency_tx_hash=dep_data['dependency_tx_hash'],
+            dependent_tx_index=dep_data['dependent_index'],
+            dependency_tx_index=dep_data['dependency_index'],
+            contract_address="0x" + "0" * 40,
+            storage_slot="0x0",
+            dependency_reason=dep_data['dependency_reason'],
+            gas_impact=dep_data.get('gas_impact', 0)
+        ))
+    return dependencies 
+
+
+def analyze_parallelization_aggregate(thread_counts=None, strategies=None, output_dir='./data/graphs'):
+    """
+    Run parallelization simulation across ALL collected blocks to generate aggregate statistics.
+    This provides averages, 95% confidence intervals, and maximums across hundreds of blocks.
+    """
+    print("🚀 Starting Aggregate Parallelization Analysis across all collected blocks...")
+    
+    if not PARALLELIZATION_AVAILABLE:
+        print("❌ Parallelization analysis modules not available")
+        return 1
+    
+    try:
+        database = BlockchainDatabase()
+        
+        # Check available data
+        stats = database.get_database_stats()
+        total_blocks = stats.get('block_count', 0)
+        
+        if total_blocks == 0:
+            print("❌ No blocks found in database. Run data collection first.")
+            return 1
+        
+        print(f"📊 Found {total_blocks} blocks in database")
+        print(f"   Block range: {stats.get('block_range', {})}")
+        
+        # Default parameters
+        if thread_counts is None:
+            thread_counts = [1, 2, 4, 8, 16, 32]
+        if strategies is None:
+            strategies = [
+                ParallelizationStrategy.SEQUENTIAL,
+                ParallelizationStrategy.DEPENDENCY_AWARE
+            ]
+        
+        # Get all blocks with reasonable transaction counts
+        cursor = database.connection.cursor()
+        cursor.execute("""
+            SELECT number FROM blocks 
+            WHERE transaction_count >= 20  -- Skip very small blocks for meaningful analysis
+            ORDER BY number ASC
+        """)
+        
+        block_numbers = [row[0] for row in cursor.fetchall()]
+        
+        if len(block_numbers) < 10:
+            print(f"❌ Need at least 10 blocks for statistical analysis, found {len(block_numbers)}")
+            return 1
+        
+        print(f"🔄 Running parallelization simulation on {len(block_numbers)} blocks...")
+        print(f"   Thread counts: {thread_counts}")
+        print(f"   Strategies: {[s.value for s in strategies]}")
+        
+        # Initialize simulator and visualizer
+        simulator = ParallelizationSimulator()
+        visualizer = ParallelizationComparisonVisualizer(output_dir=output_dir)
+        
+        # Run simulation across all blocks
+        html_path = visualizer.create_aggregate_statistics_plot(
+            database,
+            block_numbers=block_numbers,
+            thread_counts=thread_counts,
+            strategies=strategies,
+            min_blocks=len(block_numbers)
+        )
+        
+        print(f"✅ Aggregate parallelization statistics saved to: {html_path}")
+        print(f"\n🎯 Analysis complete!")
+        print(f"   📦 Analyzed {len(block_numbers)} blocks")
+        print(f"   📊 Statistical aggregation with 95% confidence intervals")
+        print(f"   📈 Average, maximum, and confidence bounds across all blocks")
+        
+        return 0
+        
+    except Exception as e:
+        print(f"❌ Error in aggregate parallelization analysis: {e}")
+        import traceback
+        traceback.print_exc()
+        return 1 

@@ -112,6 +112,69 @@ def create_parser():
         help='Find and analyze the longest dependency chain'
     )
     
+    # analyze parallelization
+    parallel_parser = analyze_subs.add_parser(
+        'parallelization',
+        help='Analyze parallelization strategies and thread count performance'
+    )
+    parallel_parser.add_argument(
+        '--block',
+        type=int,
+        help='Specific block to analyze (default: recent block with good transaction count)'
+    )
+    parallel_parser.add_argument(
+        '--threads',
+        type=str,
+        default='1,2,4,8,16,32',
+        help='Comma-separated thread counts to test (default: 1,2,4,8,16,32)'
+    )
+    parallel_parser.add_argument(
+        '--strategies',
+        type=str,
+        default='all',
+        help='Parallelization strategies to compare: all, sequential, dependency-aware (default: all). Use comma-separated for multiple.'
+    )
+    parallel_parser.add_argument(
+        '--multi-block',
+        action='store_true',
+        help='Run analysis across multiple blocks for validation'
+    )
+    parallel_parser.add_argument(
+        '--aggregate',
+        action='store_true',
+        help='Create aggregate statistical analysis with confidence intervals (10+ blocks)'
+    )
+    parallel_parser.add_argument(
+        '--output-dir',
+        type=str,
+        default='./data/graphs',
+        help='Directory to save visualization outputs (default: ./data/graphs)'
+    )
+    
+    # analyze aggregate (parallelization across all collected blocks)
+    aggregate_parser = analyze_subs.add_parser(
+        'aggregate',
+        help='Run parallelization analysis across ALL collected blocks with statistical aggregation'
+    )
+    aggregate_parser.add_argument(
+        '--thread-counts',
+        type=str,
+        default='1,2,4,8,16,32',
+        help='Comma-separated thread counts to test (default: 1,2,4,8,16,32)'
+    )
+    aggregate_parser.add_argument(
+        '--strategies',
+        type=str,
+        default='all',
+        help='Parallelization strategies: all, sequential, dependency-aware (default: all)'
+    )
+    aggregate_parser.add_argument(
+        '--output-dir',
+        type=str,
+        default='./data/graphs',
+        help='Directory to save visualization outputs (default: ./data/graphs)'
+    )
+    
     # COLLECT command group
     collect_parser = subparsers.add_parser(
         'collect',

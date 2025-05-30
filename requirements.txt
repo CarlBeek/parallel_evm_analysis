@@ -6,6 +6,7 @@ eth-utils==2.2.2
 # Data analysis and manipulation
 pandas==2.2.0
 numpy==1.26.3
+scipy==1.11.4
 
 # Database
 sqlalchemy==2.0.25
