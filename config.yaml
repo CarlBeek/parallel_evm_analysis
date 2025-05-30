@@ -6,8 +6,9 @@ ethereum:
   node_type: 'geth'
   
   # Node connection settings
-  rpc_url: 'http://10.0.30.105:8545'
-  ws_url: 'ws://10.0.30.105:8546'
+  # rpc_url: 'http://ts-geth:8545'
+  rpc_url: 'http://ts-geth:8545'
+  ws_url: 'ws://ts-geth:8546'
   
   # API modules required
   required_modules: ['eth', 'net', 'web3', 'debug']

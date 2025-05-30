@@ -472,6 +472,25 @@ class ParallelizationComparisonVisualizer:
         speedup_means, speedup_std_lower, speedup_std_upper, speedup_maxes, speedup_mins = calculate_stats(speedup_data)
         efficiency_means, efficiency_std_lower, efficiency_std_upper, efficiency_maxes, efficiency_mins = calculate_stats(efficiency_data)
         
+        # Calculate theoretical limits
+        # For gas per thread: perfect distribution would be total_gas / thread_count
+        total_gas_values = []
+        for block_num in block_numbers:
+            try:
+                transactions_raw = database.get_transactions_by_block(block_num)
+                if transactions_raw:
+                    block_total_gas = sum(tx['gas_used'] or 0 for tx in transactions_raw)
+                    total_gas_values.append(block_total_gas)
+            except:
+                continue
+        
+        if total_gas_values:
+            mean_total_gas = np.mean(total_gas_values) / 1_000_000  # Convert to millions
+            theoretical_gas_per_thread = [mean_total_gas / tc for tc in thread_counts]
+        else:
+            mean_total_gas = 18.0  # Fallback to ~18M gas as suggested
+            theoretical_gas_per_thread = [mean_total_gas / tc for tc in thread_counts]
+        
         # Create three separate plots
         plot_paths = []
         
@@ -524,10 +543,26 @@ class ParallelizationComparisonVisualizer:
             )
         )
         
+        # Theoretical perfect distribution line
+        gas_fig.add_trace(
+            go.Scatter(
+                x=thread_counts,
+                y=theoretical_gas_per_thread,
+                mode='lines',
+                name='Theoretical Perfect Distribution',
+                line=dict(color='#1f77b4', width=3, dash='dot'),  # Blue dotted line
+                hovertemplate='<b>Theoretical Perfect</b><br>' +
+                            'Threads: %{x}<br>' +
+                            'Gas: %{y:.1f}M<br>' +
+                            f'Based on {mean_total_gas:.1f}M mean total gas<br>' +
+                            '<extra></extra>'
+            )
+        )
+        
         gas_fig.update_layout(
             title=dict(
                 text=f"Gas per Thread<br>" +
-                     f"<sub>{successful_blocks} blocks analyzed - Mean and Mean ± 1σ</sub>",
+                     f"<sub>{successful_blocks} blocks analyzed - Mean ± 1σ with theoretical limits</sub>",
                 x=0.5,
                 font=dict(size=18)
             ),
@@ -613,10 +648,26 @@ class ParallelizationComparisonVisualizer:
             )
         )
         
+        # Theoretical perfect linear speedup (y = x)
+        speedup_fig.add_trace(
+            go.Scatter(
+                x=thread_counts,
+                y=thread_counts,  # Perfect linear speedup: y = x
+                mode='lines',
+                name='Theoretical Linear Speedup',
+                line=dict(color='#1f77b4', width=3, dash='dot'),  # Blue dotted line
+                hovertemplate='<b>Theoretical Perfect</b><br>' +
+                            'Threads: %{x}<br>' +
+                            'Speedup: %{y:.2f}x<br>' +
+                            'Perfect linear scaling<br>' +
+                            '<extra></extra>'
+            )
+        )
+        
         speedup_fig.update_layout(
             title=dict(
                 text=f"Parallel Speedup vs Sequential<br>" +
-                     f"<sub>{successful_blocks} blocks analyzed - Mean and Mean ± 1σ</sub>",
+                     f"<sub>{successful_blocks} blocks analyzed - Mean ± 1σ with theoretical limits</sub>",
                 x=0.5,
                 font=dict(size=18)
             ),
@@ -689,7 +740,7 @@ class ParallelizationComparisonVisualizer:
         efficiency_fig.update_layout(
             title=dict(
                 text=f"Thread Efficiency (Load Balance)<br>" +
-                     f"<sub>{successful_blocks} blocks analyzed - Mean and Mean ± 1σ</sub>",
+                     f"<sub>{successful_blocks} blocks analyzed - Mean ± 1σ</sub>",
                 x=0.5,
                 font=dict(size=18)
             ),

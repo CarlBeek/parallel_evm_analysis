@@ -46,8 +46,8 @@ class EthereumClient:
             return {
                 'ethereum': {
                     'node_type': 'geth',
-                    'rpc_url': 'http://10.0.30.105:8545',
-                    'ws_url': 'ws://10.0.30.105:8546',
+                    'rpc_url': 'http://ts-geth:8545',
+                    'ws_url': 'ws://ts-geth:8546',
                     'required_modules': ['eth', 'net', 'web3', 'debug'],
                     'timeout': 30
                 }
@@ -56,7 +56,7 @@ class EthereumClient:
     def _setup_connection(self):
         """Establish connection to the Ethereum node."""
         eth_config = self.config.get('ethereum', {})
-        rpc_url = eth_config.get('rpc_url', 'http://10.0.30.105:8545')
+        rpc_url = eth_config.get('rpc_url', 'http://ts-geth:8545')
         
         try:
             self.logger.info(f"Connecting to Ethereum node at {rpc_url}")

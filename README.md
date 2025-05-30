@@ -211,7 +211,7 @@ Edit `config.yaml` to customize:
 ```yaml
 # Ethereum node settings
 ethereum:
-  rpc_url: 'http://10.0.30.105:8545'
+  rpc_url: 'http://ts-geth:8545'
   timeout: 30
 
 # Analysis parameters  
