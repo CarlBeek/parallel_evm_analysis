@@ -207,7 +207,7 @@ class ChainExplorer:
         fig.update_yaxes(title_text="Chain ID", row=2, col=1)
         
         fig.update_xaxes(title_text="Chain Length", row=2, col=2)
-        fig.update_yaxes(title_text="Average Gas per Transaction", row=2, col=2)
+        fig.update_yaxes(title_text="Mean Gas per Transaction", row=2, col=2)
         
         return fig
     

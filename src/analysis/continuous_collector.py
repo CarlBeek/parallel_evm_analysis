@@ -253,8 +253,8 @@ class ContinuousCollector:
         if self.stats.blocks_analyzed > 0:
             avg_txs_per_block = self.stats.transactions_analyzed / self.stats.blocks_analyzed
             avg_deps_per_block = self.stats.dependencies_found / self.stats.blocks_analyzed
-            self.logger.info(f"  Average transactions per block: {avg_txs_per_block:.1f}")
-            self.logger.info(f"  Average dependencies per block: {avg_deps_per_block:.1f}")
+            self.logger.info(f"  Mean transactions per block: {avg_txs_per_block:.1f}")
+            self.logger.info(f"  Mean dependencies per block: {avg_deps_per_block:.1f}")
     
     def get_stats(self) -> Dict[str, Any]:
         """Get current collection statistics."""

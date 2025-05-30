@@ -1,6 +1,6 @@
 """
-Parallelization comparison visualization for thread count performance analysis.
-Creates interactive plots showing how gas requirements change with thread count across different strategies.
+Parallelization visualization for thread count performance analysis.
+Creates interactive plots showing how gas requirements change with thread count.
 """
 
 import logging
@@ -21,8 +21,6 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from analysis.parallelization_simulator import (
     ParallelizationSimulator, 
-    ParallelizationStrategy,
-    MultiStrategyAnalysis,
     ThreadCountAnalysis
 )
 from storage.database import BlockchainDatabase
@@ -32,13 +30,13 @@ from analysis.state_dependency_analyzer import StateDependency
 
 class ParallelizationComparisonVisualizer:
     """
-    Creates interactive visualizations comparing parallelization strategies across thread counts.
-    Generates the research plots needed for thread count vs. gas requirements analysis.
+    Creates interactive visualizations for parallelization thread count analysis.
+    Generates research plots showing gas requirements vs thread count.
     """
     
     def __init__(self, output_dir: str = "./data/graphs"):
         """
-        Initialize the parallelization comparison visualizer.
+        Initialize the parallelization visualizer.
         
         Args:
             output_dir: Directory to save visualization outputs
@@ -46,23 +44,17 @@ class ParallelizationComparisonVisualizer:
         self.output_dir = Path(output_dir)
         self.output_dir.mkdir(exist_ok=True)
         self.logger = logging.getLogger(__name__)
-        
-        # Color scheme for strategies
-        self.strategy_colors = {
-            ParallelizationStrategy.SEQUENTIAL: '#1f77b4',      # Blue
-            ParallelizationStrategy.DEPENDENCY_AWARE: '#2ca02c'  # Green
-        }
     
     def create_thread_count_comparison(
         self,
-        analysis: MultiStrategyAnalysis,
+        analysis: ThreadCountAnalysis,
         title_suffix: str = ""
     ) -> str:
         """
         Create comprehensive thread count comparison visualization.
         
         Args:
-            analysis: MultiStrategyAnalysis containing all strategy results
+            analysis: ThreadCountAnalysis containing results
             title_suffix: Optional suffix for the title
             
         Returns:
@@ -75,7 +67,7 @@ class ParallelizationComparisonVisualizer:
             rows=2, cols=2,
             subplot_titles=[
                 'Maximum Gas per Thread (Bottleneck)',
-                'Average Gas per Thread (Utilization)', 
+                'Mean Gas per Thread (Utilization)', 
                 'Parallel Speedup vs Sequential',
                 'Thread Efficiency (Load Balance)'
             ],
@@ -83,87 +75,83 @@ class ParallelizationComparisonVisualizer:
                    [{'secondary_y': False}, {'secondary_y': False}]]
         )
         
-        # Process data for each strategy
-        for strategy, strategy_analysis in analysis.strategy_analyses.items():
-            color = self.strategy_colors[strategy]
-            name = strategy.value.replace('_', ' ').title()
-            
-            thread_counts = strategy_analysis.thread_counts
-            bottleneck_gas = strategy_analysis.bottleneck_gas_values
-            average_gas = strategy_analysis.average_gas_values
-            speedup = strategy_analysis.speedup_values
-            efficiency = strategy_analysis.efficiency_values
-            
-            # Plot 1: Bottleneck Gas (most important for research)
-            fig.add_trace(
-                go.Scatter(
-                    x=thread_counts,
-                    y=[gas / 1_000_000 for gas in bottleneck_gas],  # Convert to millions
-                    mode='lines+markers',
-                    name=name,
-                    line=dict(color=color, width=3),
-                    marker=dict(size=8),
-                    hovertemplate=f'<b>{name}</b><br>' +
-                                'Threads: %{x}<br>' +
-                                'Max Gas: %{y:.1f}M<br>' +
-                                '<extra></extra>'
-                ),
-                row=1, col=1
-            )
-            
-            # Plot 2: Average Gas
-            fig.add_trace(
-                go.Scatter(
-                    x=thread_counts,
-                    y=[gas / 1_000_000 for gas in average_gas],
-                    mode='lines+markers',
-                    name=name,
-                    line=dict(color=color, width=3),
-                    marker=dict(size=8),
-                    showlegend=False,
-                    hovertemplate=f'<b>{name}</b><br>' +
-                                'Threads: %{x}<br>' +
-                                'Avg Gas: %{y:.1f}M<br>' +
-                                '<extra></extra>'
-                ),
-                row=1, col=2
-            )
-            
-            # Plot 3: Speedup
-            fig.add_trace(
-                go.Scatter(
-                    x=thread_counts,
-                    y=speedup,
-                    mode='lines+markers',
-                    name=name,
-                    line=dict(color=color, width=3),
-                    marker=dict(size=8),
-                    showlegend=False,
-                    hovertemplate=f'<b>{name}</b><br>' +
-                                'Threads: %{x}<br>' +
-                                'Speedup: %{y:.2f}x<br>' +
-                                '<extra></extra>'
-                ),
-                row=2, col=1
-            )
-            
-            # Plot 4: Thread Efficiency
-            fig.add_trace(
-                go.Scatter(
-                    x=thread_counts,
-                    y=efficiency,
-                    mode='lines+markers',
-                    name=name,
-                    line=dict(color=color, width=3),
-                    marker=dict(size=8),
-                    showlegend=False,
-                    hovertemplate=f'<b>{name}</b><br>' +
-                                'Threads: %{x}<br>' +
-                                'Efficiency: %{y:.2f}<br>' +
-                                '<extra></extra>'
-                ),
-                row=2, col=2
-            )
+        thread_counts = analysis.thread_counts
+        bottleneck_gas = analysis.bottleneck_gas_values
+        speedup = analysis.speedup_values
+        efficiency = analysis.efficiency_values
+        
+        color = '#2ca02c'  # Green for parallelization
+        
+        # Plot 1: Bottleneck Gas (most important for research)
+        fig.add_trace(
+            go.Scatter(
+                x=thread_counts,
+                y=[gas / 1_000_000 for gas in bottleneck_gas],  # Convert to millions
+                mode='lines+markers',
+                name='Parallelization',
+                line=dict(color=color, width=3),
+                marker=dict(size=8),
+                hovertemplate='<b>Parallelization</b><br>' +
+                            'Threads: %{x}<br>' +
+                            'Max Gas: %{y:.1f}M<br>' +
+                            '<extra></extra>'
+            ),
+            row=1, col=1
+        )
+        
+        # Plot 2: Mean Gas
+        fig.add_trace(
+            go.Scatter(
+                x=thread_counts,
+                y=[gas / 1_000_000 for gas in analysis.mean_gas_values],
+                mode='lines+markers',
+                name='Parallelization',
+                line=dict(color=color, width=3),
+                marker=dict(size=8),
+                showlegend=False,
+                hovertemplate='<b>Parallelization</b><br>' +
+                            'Threads: %{x}<br>' +
+                            'Mean Gas: %{y:.1f}M<br>' +
+                            '<extra></extra>'
+            ),
+            row=1, col=2
+        )
+        
+        # Plot 3: Speedup
+        fig.add_trace(
+            go.Scatter(
+                x=thread_counts,
+                y=speedup,
+                mode='lines+markers',
+                name='Parallelization',
+                line=dict(color=color, width=3),
+                marker=dict(size=8),
+                showlegend=False,
+                hovertemplate='<b>Parallelization</b><br>' +
+                            'Threads: %{x}<br>' +
+                            'Speedup: %{y:.2f}x<br>' +
+                            '<extra></extra>'
+            ),
+            row=2, col=1
+        )
+        
+        # Plot 4: Thread Efficiency
+        fig.add_trace(
+            go.Scatter(
+                x=thread_counts,
+                y=efficiency,
+                mode='lines+markers',
+                name='Parallelization',
+                line=dict(color=color, width=3),
+                marker=dict(size=8),
+                showlegend=False,
+                hovertemplate='<b>Parallelization</b><br>' +
+                            'Threads: %{x}<br>' +
+                            'Efficiency: %{y:.2f}<br>' +
+                            '<extra></extra>'
+            ),
+            row=2, col=2
+        )
         
         # Update axes labels and formatting
         fig.update_xaxes(title_text="Number of Threads", row=1, col=1)
@@ -177,7 +165,7 @@ class ParallelizationComparisonVisualizer:
         fig.update_yaxes(title_text="Efficiency (0-1)", row=2, col=2)
         
         # Update layout
-        title = f"Parallelization Strategy Comparison - Block {analysis.block_number}"
+        title = f"Thread Count Performance Analysis - Block {analysis.block_number}"
         if title_suffix:
             title += f" {title_suffix}"
             
@@ -192,9 +180,9 @@ class ParallelizationComparisonVisualizer:
             legend=dict(
                 orientation="h",
                 yanchor="bottom",
-                y=1.02,
-                xanchor="right",
-                x=1
+                y=1.15,
+                xanchor="center",
+                x=0.5
             )
         )
         
@@ -202,7 +190,7 @@ class ParallelizationComparisonVisualizer:
         self._add_insights_annotations(fig, analysis)
         
         # Save to HTML file
-        filename = f"parallelization_comparison_block_{analysis.block_number}.html"
+        filename = f"parallelization_analysis_block_{analysis.block_number}.html"
         filepath = self.output_dir / filename
         
         fig.write_html(
@@ -216,24 +204,19 @@ class ParallelizationComparisonVisualizer:
     
     def create_research_focus_plot(
         self,
-        analysis: MultiStrategyAnalysis,
-        strategies: Optional[List[ParallelizationStrategy]] = None
+        analysis: ThreadCountAnalysis
     ) -> str:
         """
         Create a focused plot specifically for research showing max/avg gas vs threads.
         This is the primary plot needed for the research write-up.
         
         Args:
-            analysis: MultiStrategyAnalysis containing strategy results
-            strategies: Optional list of strategies to include (default: all)
+            analysis: ThreadCountAnalysis containing results
             
         Returns:
             Path to the generated HTML file
         """
-        if strategies is None:
-            strategies = list(analysis.strategy_analyses.keys())
-        
-        self.logger.info(f"Creating research focus plot for {len(strategies)} strategies")
+        self.logger.info(f"Creating research focus plot for block {analysis.block_number}")
         
         # Create subplot with secondary y-axis
         fig = make_subplots(
@@ -241,52 +224,60 @@ class ParallelizationComparisonVisualizer:
             specs=[[{"secondary_y": True}]]
         )
         
-        # Plot maximum gas (primary y-axis) and average gas (secondary y-axis)
-        for strategy in strategies:
-            if strategy not in analysis.strategy_analyses:
-                continue
-                
-            strategy_analysis = analysis.strategy_analyses[strategy]
-            color = self.strategy_colors[strategy]
-            name = strategy.value.replace('_', ' ').title()
+        thread_counts = analysis.thread_counts
+        bottleneck_gas = [gas / 1_000_000 for gas in analysis.bottleneck_gas_values]
+        mean_gas = [gas / 1_000_000 for gas in analysis.mean_gas_values]
+        
+        color = '#2ca02c'  # Green for parallelization
+        
+        # Maximum gas (solid line)
+        fig.add_trace(
+            go.Scatter(
+                x=thread_counts,
+                y=bottleneck_gas,
+                mode='lines+markers',
+                name='Maximum Gas',
+                line=dict(color=color, width=4),
+                marker=dict(size=10),
+                hovertemplate='<b>Maximum Gas</b><br>' +
+                            'Threads: %{x}<br>' +
+                            'Max Gas: %{y:.1f}M<br>' +
+                            '<extra></extra>'
+            ),
+            secondary_y=False
+        )
+        
+        # Standard deviation bands
+        std_devs = []
+        
+        # Calculate per-thread-count statistics
+        for i, thread_count in enumerate(thread_counts):
+            gas_values = []
+            for block_analysis in all_analysis:
+                if len(block_analysis.bottleneck_gas_values) > i:
+                    gas_values.append(block_analysis.bottleneck_gas_values[i])
             
-            thread_counts = strategy_analysis.thread_counts
-            bottleneck_gas = [gas / 1_000_000 for gas in strategy_analysis.bottleneck_gas_values]
-            average_gas = [gas / 1_000_000 for gas in strategy_analysis.average_gas_values]
-            
-            # Maximum gas (solid line)
-            fig.add_trace(
-                go.Scatter(
-                    x=thread_counts,
-                    y=bottleneck_gas,
-                    mode='lines+markers',
-                    name=f'{name} (Max)',
-                    line=dict(color=color, width=4),
-                    marker=dict(size=10),
-                    hovertemplate=f'<b>{name} - Maximum Gas</b><br>' +
-                                'Threads: %{x}<br>' +
-                                'Max Gas: %{y:.1f}M<br>' +
-                                '<extra></extra>'
-                ),
-                secondary_y=False
+            if gas_values:
+                std_dev = float(np.std(gas_values) / 1_000_000)
+                std_devs.append(std_dev)
+            else:
+                std_devs.append(0.0)
+        
+        # Mean gas (dashed line)
+        fig.add_trace(
+            go.Scatter(
+                x=thread_counts,
+                y=mean_gas,
+                mode='lines+markers',
+                name='Mean Gas',
+                line=dict(color='red', width=2, dash='dash'),
+                marker=dict(size=6),
+                hovertemplate='<b>Mean Gas</b><br>' +
+                            'Threads: %{x}<br>' +
+                            'Gas: %{y:.1f}M<br>' +
+                            '<extra></extra>'
             )
-            
-            # Average gas (dashed line)
-            fig.add_trace(
-                go.Scatter(
-                    x=thread_counts,
-                    y=average_gas,
-                    mode='lines+markers',
-                    name=f'{name} (Avg)',
-                    line=dict(color=color, width=3, dash='dash'),
-                    marker=dict(size=8, symbol='diamond'),
-                    hovertemplate=f'<b>{name} - Average Gas</b><br>' +
-                                'Threads: %{x}<br>' +
-                                'Avg Gas: %{y:.1f}M<br>' +
-                                '<extra></extra>'
-                ),
-                secondary_y=True
-            )
+        )
         
         # Update axes
         fig.update_xaxes(
@@ -313,9 +304,7 @@ class ParallelizationComparisonVisualizer:
         fig.update_layout(
             title=dict(
                 text=f"Gas Requirements vs Thread Count<br>" +
-                     f"<sub>Block {analysis.block_number} " +
-                     f"({analysis.transaction_count:,} transactions, " +
-                     f"{analysis.dependency_count} dependencies)</sub>",
+                     f"<sub>Block {analysis.block_number}</sub>",
                 x=0.5,
                 font=dict(size=20)
             ),
@@ -354,193 +343,28 @@ class ParallelizationComparisonVisualizer:
         self.logger.info(f"Research focus plot saved to {filepath}")
         return str(filepath)
     
-    def create_multi_block_analysis(
-        self,
-        database: BlockchainDatabase,
-        block_numbers: Optional[List[int]] = None,
-        thread_counts: Optional[List[int]] = None,
-        strategies: Optional[List[ParallelizationStrategy]] = None
-    ) -> str:
-        """
-        Create analysis across multiple blocks to show consistency of results.
-        
-        Args:
-            database: Database instance for loading block data
-            block_numbers: List of block numbers to analyze (default: recent blocks)
-            thread_counts: Thread counts to test (default: [1,2,4,8,16,32])
-            strategies: Strategies to test (default: all)
-            
-        Returns:
-            Path to the generated HTML file
-        """
-        if thread_counts is None:
-            thread_counts = [1, 2, 4, 8, 16, 32]
-        
-        if strategies is None:
-            strategies = [
-                ParallelizationStrategy.SEQUENTIAL,
-                ParallelizationStrategy.DEPENDENCY_AWARE
-            ]
-        
-        if block_numbers is None:
-            # Get 3 recent blocks with good transaction counts
-            stats = database.get_database_stats()
-            max_block = stats['block_range']['max']
-            block_numbers = []
-            
-            for i in range(10):  # Check last 10 blocks
-                block_num = max_block - i
-                block_data = database.get_block(block_num)
-                if block_data and block_data['transaction_count'] > 100:
-                    block_numbers.append(block_num)
-                if len(block_numbers) >= 3:
-                    break
-        
-        self.logger.info(f"Creating multi-block analysis for {len(block_numbers)} blocks")
-        
-        # Analyze each block
-        simulator = ParallelizationSimulator()
-        all_analyses = []
-        
-        for block_num in block_numbers:
-            try:
-                # Load block data
-                transactions_raw = database.get_transactions_by_block(block_num)
-                dependencies_raw = database.get_dependencies_for_block(block_num)
-                
-                # Convert to objects
-                transactions = self._convert_transactions(transactions_raw)
-                dependencies = self._convert_dependencies(dependencies_raw)
-                
-                # Run analysis
-                analysis = simulator.analyze_thread_count_performance(
-                    transactions, dependencies, block_num, thread_counts, strategies
-                )
-                all_analyses.append(analysis)
-                
-            except Exception as e:
-                self.logger.warning(f"Failed to analyze block {block_num}: {e}")
-                continue
-        
-        if not all_analyses:
-            raise ValueError("No blocks could be analyzed")
-        
-        # Create visualization
-        fig = make_subplots(
-            rows=len(strategies), cols=2,
-            subplot_titles=[f'{strategy.value.replace("_", " ").title()} - Max Gas' 
-                          for strategy in strategies] + 
-                         [f'{strategy.value.replace("_", " ").title()} - Speedup' 
-                          for strategy in strategies],
-            vertical_spacing=0.08
-        )
-        
-        colors = px.colors.qualitative.Set1
-        
-        for i, analysis in enumerate(all_analyses):
-            color = colors[i % len(colors)]
-            block_label = f"Block {analysis.block_number}"
-            
-            for j, strategy in enumerate(strategies):
-                if strategy in analysis.strategy_analyses:
-                    strategy_analysis = analysis.strategy_analyses[strategy]
-                    
-                    # Max gas plot
-                    fig.add_trace(
-                        go.Scatter(
-                            x=strategy_analysis.thread_counts,
-                            y=[gas / 1_000_000 for gas in strategy_analysis.bottleneck_gas_values],
-                            mode='lines+markers',
-                            name=block_label,
-                            line=dict(color=color),
-                            showlegend=(j == 0),  # Only show legend for first strategy
-                            hovertemplate=f'<b>{block_label}</b><br>' +
-                                        'Threads: %{x}<br>' +
-                                        'Max Gas: %{y:.1f}M<br>' +
-                                        '<extra></extra>'
-                        ),
-                        row=j+1, col=1
-                    )
-                    
-                    # Speedup plot
-                    fig.add_trace(
-                        go.Scatter(
-                            x=strategy_analysis.thread_counts,
-                            y=strategy_analysis.speedup_values,
-                            mode='lines+markers',
-                            name=block_label,
-                            line=dict(color=color),
-                            showlegend=False,
-                            hovertemplate=f'<b>{block_label}</b><br>' +
-                                        'Threads: %{x}<br>' +
-                                        'Speedup: %{y:.2f}x<br>' +
-                                        '<extra></extra>'
-                        ),
-                        row=j+1, col=2
-                    )
-        
-        # Update layout
-        fig.update_layout(
-            title=dict(
-                text=f"Multi-Block Thread Count Analysis<br>" +
-                     f"<sub>{len(all_analyses)} blocks compared</sub>",
-                x=0.5,
-                font=dict(size=20)
-            ),
-            height=300 * len(strategies),
-            hovermode='x unified'
-        )
-        
-        # Update axes
-        for i in range(len(strategies)):
-            fig.update_xaxes(title_text="Number of Threads", row=i+1, col=1)
-            fig.update_xaxes(title_text="Number of Threads", row=i+1, col=2)
-            fig.update_yaxes(title_text="Gas (Millions)", row=i+1, col=1)
-            fig.update_yaxes(title_text="Speedup (x)", row=i+1, col=2)
-        
-        # Save to HTML file
-        filename = f"multi_block_thread_analysis_{len(all_analyses)}_blocks.html"
-        filepath = self.output_dir / filename
-        
-        fig.write_html(
-            str(filepath),
-            include_plotlyjs=True,
-            config={'displayModeBar': True, 'displaylogo': False}
-        )
-        
-        self.logger.info(f"Multi-block analysis saved to {filepath}")
-        return str(filepath)
-    
     def create_aggregate_statistics_plot(
         self,
         database: BlockchainDatabase,
         block_numbers: Optional[List[int]] = None,
         thread_counts: Optional[List[int]] = None,
-        strategies: Optional[List[ParallelizationStrategy]] = None,
         min_blocks: int = 10
     ) -> str:
         """
         Create aggregate statistical analysis across multiple blocks.
-        Shows average, 95% confidence interval, and maximum gas per thread vs thread count.
+        Shows mean, 95% confidence interval, and maximum gas per thread vs thread count.
         
         Args:
             database: Database instance for loading block data
             block_numbers: List of block numbers to analyze (default: recent blocks with good tx count)
             thread_counts: Thread counts to test (default: [1,2,4,8,16,32])
-            strategies: Strategies to test (default: all)
             min_blocks: Minimum number of blocks to analyze for statistics
             
         Returns:
             Path to the generated HTML file
         """
         if thread_counts is None:
-            thread_counts = [1, 2, 4, 8, 16, 32]
-        
-        if strategies is None:
-            strategies = [
-                ParallelizationStrategy.SEQUENTIAL,
-                ParallelizationStrategy.DEPENDENCY_AWARE
-            ]
+            thread_counts = [1, 2, 4, 8, 16, 32, 64]
         
         if block_numbers is None:
             # Get blocks with good transaction counts for statistical analysis
@@ -564,7 +388,9 @@ class ParallelizationComparisonVisualizer:
         
         # Collect data from all blocks
         simulator = ParallelizationSimulator()
-        strategy_data = {strategy: {tc: [] for tc in thread_counts} for strategy in strategies}
+        gas_data = {tc: [] for tc in thread_counts}
+        speedup_data = {tc: [] for tc in thread_counts}
+        efficiency_data = {tc: [] for tc in thread_counts}
         
         successful_blocks = 0
         for block_num in block_numbers:
@@ -582,17 +408,19 @@ class ParallelizationComparisonVisualizer:
                 
                 # Run analysis
                 analysis = simulator.analyze_thread_count_performance(
-                    transactions, dependencies, block_num, thread_counts, strategies
+                    transactions, dependencies, block_num, thread_counts
                 )
                 
-                # Collect bottleneck gas data for each strategy and thread count
-                for strategy in strategies:
-                    if strategy in analysis.strategy_analyses:
-                        strategy_analysis = analysis.strategy_analyses[strategy]
-                        for i, tc in enumerate(thread_counts):
-                            if i < len(strategy_analysis.bottleneck_gas_values):
-                                gas_millions = strategy_analysis.bottleneck_gas_values[i] / 1_000_000
-                                strategy_data[strategy][tc].append(gas_millions)
+                # Collect data for each thread count
+                for i, tc in enumerate(thread_counts):
+                    if i < len(analysis.bottleneck_gas_values):
+                        gas_millions = analysis.bottleneck_gas_values[i] / 1_000_000
+                        speedup = analysis.speedup_values[i]
+                        efficiency = analysis.efficiency_values[i]
+                        
+                        gas_data[tc].append(gas_millions)
+                        speedup_data[tc].append(speedup)
+                        efficiency_data[tc].append(efficiency)
                 
                 successful_blocks += 1
                 
@@ -608,164 +436,303 @@ class ParallelizationComparisonVisualizer:
         
         self.logger.info(f"Successfully analyzed {successful_blocks} blocks for statistics")
         
-        # Calculate statistics for each strategy
-        fig = go.Figure()
+        color = '#2ca02c'  # Green for parallelization
         
-        for strategy in strategies:
-            color = self.strategy_colors[strategy]
-            name = strategy.value.replace('_', ' ').title()
-            
-            means = []
-            ci_lower = []
-            ci_upper = []
-            maxes = []
-            
-            # Calculate statistics for each thread count
+        # Calculate statistics for each metric
+        def calculate_stats(data_dict):
+            means, std_lower, std_upper, maxes, mins = [], [], [], [], []
             for tc in thread_counts:
-                data = strategy_data[strategy][tc]
+                data = data_dict[tc]
                 if not data:
+                    means.append(0)
+                    std_lower.append(0)
+                    std_upper.append(0)
+                    maxes.append(0)
+                    mins.append(0)
                     continue
                     
                 data_array = np.array(data)
                 mean_val = np.mean(data_array)
                 max_val = np.max(data_array)
+                min_val = np.min(data_array)
                 
-                # Calculate 95% confidence interval
+                # Calculate Mean ± 1σ (shows ~68% of actual blocks)
                 if len(data) > 1:
-                    sem = stats.sem(data_array)  # Standard error of mean
-                    ci = stats.t.interval(0.95, len(data_array)-1, loc=mean_val, scale=sem)
-                    ci_lower.append(ci[0])
-                    ci_upper.append(ci[1])
-                else:
-                    ci_lower.append(mean_val)
-                    ci_upper.append(mean_val)
+                    std_val = np.std(data_array, ddof=1)  # Sample standard deviation
+                    std_lower.append(max(0, mean_val - 1 * std_val))  # Don't go below 0
+                    std_upper.append(mean_val + 1 * std_val)
                 
                 means.append(mean_val)
                 maxes.append(max_val)
-            
-            # Plot confidence interval as filled area
-            fig.add_trace(
-                go.Scatter(
-                    x=thread_counts + thread_counts[::-1],  # x, then x reversed
-                    y=ci_upper + ci_lower[::-1],  # upper, then lower reversed
-                    fill='toself',
-                    fillcolor=f'rgba{tuple(list(plt_color_to_rgb(color)) + [0.2])}',
-                    line=dict(color='rgba(255,255,255,0)'),
-                    showlegend=False,
-                    name=f'{name} 95% CI',
-                    hoverinfo='skip'
-                )
-            )
-            
-            # Plot average line
-            fig.add_trace(
-                go.Scatter(
-                    x=thread_counts,
-                    y=means,
-                    mode='lines+markers',
-                    name=f'{name} (Average)',
-                    line=dict(color=color, width=4),
-                    marker=dict(size=8),
-                    hovertemplate=f'<b>{name} - Average</b><br>' +
-                                'Threads: %{x}<br>' +
-                                'Avg Gas: %{y:.1f}M<br>' +
-                                f'Blocks: {successful_blocks}<br>' +
-                                '<extra></extra>'
-                )
-            )
-            
-            # Plot maximum line
-            fig.add_trace(
-                go.Scatter(
-                    x=thread_counts,
-                    y=maxes,
-                    mode='lines+markers',
-                    name=f'{name} (Maximum)',
-                    line=dict(color=color, width=2, dash='dash'),
-                    marker=dict(size=6, symbol='triangle-up'),
-                    hovertemplate=f'<b>{name} - Maximum</b><br>' +
-                                'Threads: %{x}<br>' +
-                                'Max Gas: %{y:.1f}M<br>' +
-                                f'Blocks: {successful_blocks}<br>' +
-                                '<extra></extra>'
-                )
-            )
+                mins.append(min_val)
+            return means, std_lower, std_upper, maxes, mins
         
-        # Update layout
-        fig.update_layout(
+        # Calculate statistics for all three metrics
+        gas_means, gas_std_lower, gas_std_upper, gas_maxes, gas_mins = calculate_stats(gas_data)
+        speedup_means, speedup_std_lower, speedup_std_upper, speedup_maxes, speedup_mins = calculate_stats(speedup_data)
+        efficiency_means, efficiency_std_lower, efficiency_std_upper, efficiency_maxes, efficiency_mins = calculate_stats(efficiency_data)
+        
+        # Create three separate plots
+        plot_paths = []
+        
+        # Plot 1: Gas per Thread (with log scale)
+        gas_fig = go.Figure()
+        
+        # Confidence interval
+        gas_fig.add_trace(
+            go.Scatter(
+                x=thread_counts + thread_counts[::-1],
+                y=gas_std_upper + gas_std_lower[::-1],
+                fill='toself',
+                fillcolor=f'rgba(44, 160, 44, 0.2)',
+                line=dict(color='rgba(255,255,255,0)'),
+                showlegend=True,
+                name='Mean ± 1σ',
+                hoverinfo='skip'
+            )
+        )
+        
+        # Average line
+        gas_fig.add_trace(
+            go.Scatter(
+                x=thread_counts,
+                y=gas_means,
+                mode='lines+markers',
+                name='Mean',
+                line=dict(color=color, width=4),
+                marker=dict(size=8),
+                hovertemplate='<b>Mean Gas</b><br>' +
+                            'Threads: %{x}<br>' +
+                            'Gas: %{y:.1f}M<br>' +
+                            '<extra></extra>'
+            )
+        )
+        
+        # Maximum line
+        gas_fig.add_trace(
+            go.Scatter(
+                x=thread_counts,
+                y=gas_maxes,
+                mode='lines+markers',
+                name='Maximum',
+                line=dict(color=color, width=2, dash='dash'),
+                marker=dict(size=6, symbol='triangle-up'),
+                hovertemplate='<b>Maximum Gas</b><br>' +
+                            'Threads: %{x}<br>' +
+                            'Gas: %{y:.1f}M<br>' +
+                            '<extra></extra>'
+            )
+        )
+        
+        gas_fig.update_layout(
             title=dict(
-                text=f"Aggregate Parallelization Statistics<br>" +
-                     f"<sub>{successful_blocks} blocks analyzed - Average, 95% CI, and Maximum</sub>",
+                text=f"Gas per Thread<br>" +
+                     f"<sub>{successful_blocks} blocks analyzed - Mean and Mean ± 1σ</sub>",
                 x=0.5,
-                font=dict(size=20)
+                font=dict(size=18)
             ),
             xaxis=dict(
                 title="Number of Threads",
-                title_font=dict(size=16),
-                tickfont=dict(size=14),
+                title_font=dict(size=14),
+                tickfont=dict(size=12),
                 showgrid=True,
                 gridcolor='lightgray'
             ),
             yaxis=dict(
                 title="Gas per Thread (Millions)",
-                title_font=dict(size=16),
-                tickfont=dict(size=14),
+                title_font=dict(size=14),
+                tickfont=dict(size=12),
                 showgrid=True,
                 gridcolor='lightgray'
             ),
             height=600,
             width=1000,
-            hovermode='x unified',
-            legend=dict(
-                orientation="v",
-                yanchor="top",
-                y=0.98,
-                xanchor="left",
-                x=0.02,
-                bgcolor="rgba(255,255,255,0.9)",
-                bordercolor="rgba(0,0,0,0.3)",
-                borderwidth=1
-            ),
             plot_bgcolor='white',
-            paper_bgcolor='white'
+            paper_bgcolor='white',
+            legend=dict(
+                orientation="h",
+                yanchor="bottom",
+                y=1.15,
+                xanchor="center",
+                x=0.5
+            )
         )
         
-        # Add statistical summary annotation
-        summary_text = f"Statistical Summary ({successful_blocks} blocks):<br>"
-        for strategy in strategies:
-            name = strategy.value.replace('_', ' ').title()
-            # Calculate overall improvement
-            if len(strategy_data[strategy][thread_counts[0]]) > 0 and len(strategy_data[strategy][thread_counts[-1]]) > 0:
-                first_mean = np.mean(strategy_data[strategy][thread_counts[0]])
-                last_mean = np.mean(strategy_data[strategy][thread_counts[-1]])
-                improvement = first_mean / last_mean if last_mean > 0 else 1.0
-                summary_text += f"• {name}: {improvement:.1f}x avg improvement<br>"
+        # Save gas plot
+        gas_filename = f"gas_per_thread_{successful_blocks}_blocks.html"
+        gas_filepath = self.output_dir / gas_filename
+        gas_fig.write_html(str(gas_filepath), include_plotlyjs=True, config={'displayModeBar': True, 'displaylogo': False})
+        plot_paths.append(str(gas_filepath))
         
-        fig.add_annotation(
-            text=summary_text,
-            xref="paper", yref="paper",
-            x=0.98, y=0.98,
-            showarrow=False,
-            font=dict(size=11),
-            bgcolor="rgba(255,255,255,0.9)",
-            bordercolor="rgba(0,0,0,0.3)",
-            borderwidth=1,
-            xanchor="right",
-            yanchor="top"
+        # Plot 2: Speedup (with min speedup line)
+        speedup_fig = go.Figure()
+        
+        # Confidence interval
+        speedup_fig.add_trace(
+            go.Scatter(
+                x=thread_counts + thread_counts[::-1],
+                y=speedup_std_upper + speedup_std_lower[::-1],
+                fill='toself',
+                fillcolor=f'rgba(44, 160, 44, 0.2)',
+                line=dict(color='rgba(255,255,255,0)'),
+                showlegend=True,
+                name='Mean ± 1σ',
+                hoverinfo='skip'
+            )
         )
         
-        # Save to HTML file
-        filename = f"aggregate_parallelization_statistics_{successful_blocks}_blocks.html"
-        filepath = self.output_dir / filename
-        
-        fig.write_html(
-            str(filepath),
-            include_plotlyjs=True,
-            config={'displayModeBar': True, 'displaylogo': False}
+        # Average speedup
+        speedup_fig.add_trace(
+            go.Scatter(
+                x=thread_counts,
+                y=speedup_means,
+                mode='lines+markers',
+                name='Mean Speedup',
+                line=dict(color=color, width=4),
+                marker=dict(size=8),
+                hovertemplate='<b>Mean Speedup</b><br>' +
+                            'Threads: %{x}<br>' +
+                            'Speedup: %{y:.2f}x<br>' +
+                            '<extra></extra>'
+            )
         )
         
-        self.logger.info(f"Aggregate statistics plot saved to {filepath}")
-        return str(filepath)
+        # Minimum speedup
+        speedup_fig.add_trace(
+            go.Scatter(
+                x=thread_counts,
+                y=speedup_mins,
+                mode='lines+markers',
+                name='Minimum Speedup',
+                line=dict(color='#d62728', width=3, dash='dot'),  # Red dashed line
+                marker=dict(size=6, symbol='triangle-down'),
+                hovertemplate='<b>Minimum Speedup</b><br>' +
+                            'Threads: %{x}<br>' +
+                            'Speedup: %{y:.2f}x<br>' +
+                            '<extra></extra>'
+            )
+        )
+        
+        speedup_fig.update_layout(
+            title=dict(
+                text=f"Parallel Speedup vs Sequential<br>" +
+                     f"<sub>{successful_blocks} blocks analyzed - Mean and Mean ± 1σ</sub>",
+                x=0.5,
+                font=dict(size=18)
+            ),
+            xaxis=dict(
+                title="Number of Threads",
+                title_font=dict(size=14),
+                tickfont=dict(size=12),
+                showgrid=True,
+                gridcolor='lightgray'
+            ),
+            yaxis=dict(
+                title="Speedup (x)",
+                title_font=dict(size=14),
+                tickfont=dict(size=12),
+                showgrid=True,
+                gridcolor='lightgray'
+            ),
+            height=600,
+            width=1000,
+            plot_bgcolor='white',
+            paper_bgcolor='white',
+            legend=dict(
+                orientation="h",
+                yanchor="bottom",
+                y=1.15,
+                xanchor="center",
+                x=0.5
+            )
+        )
+        
+        # Save speedup plot
+        speedup_filename = f"speedup_analysis_{successful_blocks}_blocks.html"
+        speedup_filepath = self.output_dir / speedup_filename
+        speedup_fig.write_html(str(speedup_filepath), include_plotlyjs=True, config={'displayModeBar': True, 'displaylogo': False})
+        plot_paths.append(str(speedup_filepath))
+        
+        # Plot 3: Thread Efficiency (with min and max efficiency lines)
+        efficiency_fig = go.Figure()
+        
+        # Confidence interval
+        efficiency_fig.add_trace(
+            go.Scatter(
+                x=thread_counts + thread_counts[::-1],
+                y=efficiency_std_upper + efficiency_std_lower[::-1],
+                fill='toself',
+                fillcolor=f'rgba(44, 160, 44, 0.2)',
+                line=dict(color='rgba(255,255,255,0)'),
+                showlegend=True,
+                name='Mean ± 1σ',
+                hoverinfo='skip'
+            )
+        )
+        
+        # Average efficiency
+        efficiency_fig.add_trace(
+            go.Scatter(
+                x=thread_counts,
+                y=efficiency_means,
+                mode='lines+markers',
+                name='Mean Efficiency',
+                line=dict(color=color, width=4),
+                marker=dict(size=8),
+                hovertemplate='<b>Mean Efficiency</b><br>' +
+                            'Threads: %{x}<br>' +
+                            'Efficiency: %{y:.2f}<br>' +
+                            '<extra></extra>'
+            )
+        )
+        
+        efficiency_fig.update_layout(
+            title=dict(
+                text=f"Thread Efficiency (Load Balance)<br>" +
+                     f"<sub>{successful_blocks} blocks analyzed - Mean and Mean ± 1σ</sub>",
+                x=0.5,
+                font=dict(size=18)
+            ),
+            xaxis=dict(
+                title="Number of Threads",
+                title_font=dict(size=14),
+                tickfont=dict(size=12),
+                showgrid=True,
+                gridcolor='lightgray'
+            ),
+            yaxis=dict(
+                title="Efficiency (0-1)",
+                title_font=dict(size=14),
+                tickfont=dict(size=12),
+                showgrid=True,
+                gridcolor='lightgray'
+            ),
+            height=600,
+            width=1000,
+            plot_bgcolor='white',
+            paper_bgcolor='white',
+            legend=dict(
+                orientation="h",
+                yanchor="bottom",
+                y=1.15,
+                xanchor="center",
+                x=0.5
+            )
+        )
+        
+        # Save efficiency plot
+        efficiency_filename = f"thread_efficiency_{successful_blocks}_blocks.html"
+        efficiency_filepath = self.output_dir / efficiency_filename
+        efficiency_fig.write_html(str(efficiency_filepath), include_plotlyjs=True, config={'displayModeBar': True, 'displaylogo': False})
+        plot_paths.append(str(efficiency_filepath))
+        
+        self.logger.info(f"Three separate plots saved:")
+        self.logger.info(f"  Gas per Thread: {gas_filepath}")
+        self.logger.info(f"  Speedup Analysis: {speedup_filepath}")
+        self.logger.info(f"  Thread Efficiency: {efficiency_filepath}")
+        
+        # Return the primary gas plot path for backwards compatibility
+        return str(gas_filepath)
     
     def _convert_transactions(self, transactions_raw: List[Dict]) -> List[TransactionData]:
         """Convert database transaction data to TransactionData objects."""
@@ -803,39 +770,25 @@ class ParallelizationComparisonVisualizer:
             ))
         return dependencies
     
-    def _add_insights_annotations(self, fig: go.Figure, analysis: MultiStrategyAnalysis):
+    def _add_insights_annotations(self, fig: go.Figure, analysis: ThreadCountAnalysis):
         """Add key insights as annotations to the figure."""
-        # Find the best performing strategy at different thread counts
-        best_strategies = {}
-        for thread_count, strategy in analysis.best_strategy_per_thread_count.items():
-            if thread_count in [1, 4, 16]:  # Key thread counts
-                best_strategies[thread_count] = strategy
+        # Find optimal thread count
+        optimal_idx = analysis.speedup_values.index(max(analysis.speedup_values))
+        optimal_threads = analysis.thread_counts[optimal_idx]
+        optimal_speedup = analysis.speedup_values[optimal_idx]
         
-        # Add annotation for key insight
-        if best_strategies:
-            annotation_text = "Key Insights:<br>"
-            for tc, strategy in best_strategies.items():
-                strategy_analysis = analysis.strategy_analyses[strategy]
-                idx = strategy_analysis.thread_counts.index(tc)
-                speedup = strategy_analysis.speedup_values[idx]
-                annotation_text += f"• {tc} threads: {strategy.value.replace('_', ' ')} best ({speedup:.1f}x)<br>"
-        
-            fig.add_annotation(
-                text=annotation_text,
-                xref="paper", yref="paper",
-                x=0.02, y=0.98,
-                showarrow=False,
-                font=dict(size=10),
-                bgcolor="rgba(255,255,255,0.8)",
-                bordercolor="rgba(0,0,0,0.3)",
-                borderwidth=1
-            ) 
-
-def plt_color_to_rgb(color_str: str) -> Tuple[int, int, int]:
-    """Convert matplotlib color string to RGB tuple."""
-    # Simple conversion for hex colors
-    if color_str.startswith('#'):
-        return tuple(int(color_str[i:i+2], 16) for i in (1, 3, 5))
-    else:
-        # Fallback for named colors - return a default
-        return (128, 128, 128) 
+        annotation_text = "Key Insights:<br>"
+        annotation_text += f"• Optimal threads: {optimal_threads} ({optimal_speedup:.1f}x speedup)<br>"
+        annotation_text += f"• Diminishing returns: {analysis.diminishing_returns_point} threads<br>"
+        annotation_text += f"• Max speedup: {analysis.max_speedup:.1f}x"
+    
+        fig.add_annotation(
+            text=annotation_text,
+            xref="paper", yref="paper",
+            x=0.02, y=0.98,
+            showarrow=False,
+            font=dict(size=10),
+            bgcolor="rgba(255,255,255,0.8)",
+            bordercolor="rgba(0,0,0,0.3)",
+            borderwidth=1
+        ) 

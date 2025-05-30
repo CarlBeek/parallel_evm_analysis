@@ -1,14 +1,12 @@
 """
-Parallelization simulation framework for comparing different thread allocation strategies.
-This module simulates how transactions would be distributed across N threads under various
-parallelization approaches and calculates performance metrics.
+Parallelization simulation framework for analyzing thread allocation performance.
+This module simulates how transactions would be distributed across N threads and calculates performance metrics.
 """
 
 import logging
 from typing import Dict, Any, List, Optional, Set, Tuple, NamedTuple
 from dataclasses import dataclass
 from collections import defaultdict
-from enum import Enum
 import math
 import sys
 from pathlib import Path
@@ -18,12 +16,6 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from core.transaction_fetcher import TransactionData
 from analysis.state_dependency_analyzer import StateDependency
-
-
-class ParallelizationStrategy(Enum):
-    """Enumeration of different parallelization strategies."""
-    SEQUENTIAL = "sequential"  # Single-thread baseline
-    DEPENDENCY_AWARE = "dependency_aware"  # Topological sorting with dependency chains
 
 
 @dataclass
@@ -50,32 +42,30 @@ class ThreadMetrics:
 @dataclass
 class ParallelizationResult:
     """Complete result of a parallelization simulation."""
-    strategy: ParallelizationStrategy
     thread_count: int
     block_number: int
     thread_metrics: List[ThreadMetrics]
     
     # Aggregate metrics
     bottleneck_gas: int  # Maximum gas on any thread (determines execution time)
-    average_gas: float  # Mean gas across threads
+    mean_gas: float  # Mean gas across threads
     thread_efficiency: float  # Ratio of min/max gas (1.0 = perfect balance)
     conflict_rate: float  # Percentage of transactions with conflicts
     total_conflicts: int
     
     # Performance improvement metrics
-    sequential_gas: int  # Total gas if executed sequentially
+    sequential_gas: int  # Total gas if executed sequentially (n=1)
     parallel_speedup: float  # Sequential gas / bottleneck gas
-    utilization_efficiency: float  # Average gas / bottleneck gas
+    utilization_efficiency: float  # Mean gas / bottleneck gas
 
 
 @dataclass
 class ThreadCountAnalysis:
-    """Analysis results across multiple thread counts for a single strategy."""
-    strategy: ParallelizationStrategy
+    """Analysis results across multiple thread counts."""
     block_number: int
     thread_counts: List[int]
     bottleneck_gas_values: List[int]  # Max gas per thread count
-    average_gas_values: List[float]  # Avg gas per thread count
+    mean_gas_values: List[float]  # Mean gas per thread count
     speedup_values: List[float]  # Speedup vs sequential per thread count
     efficiency_values: List[float]  # Thread efficiency per thread count
     
@@ -87,19 +77,21 @@ class ThreadCountAnalysis:
 
 
 @dataclass
-class MultiStrategyAnalysis:
-    """Comprehensive analysis across all strategies and thread counts."""
-    block_number: int
-    total_gas: int
-    transaction_count: int
-    dependency_count: int
+class MultiBlockAnalysis:
+    """Analysis results across multiple blocks for aggregate statistics."""
+    thread_counts: List[int]
+    block_numbers: List[int]
     
-    # Per-strategy analysis
-    strategy_analyses: Dict[ParallelizationStrategy, ThreadCountAnalysis]
+    # Aggregate statistics per thread count
+    mean_bottleneck_gas: List[float]  # Mean max gas across blocks
+    ci_lower_bottleneck: List[float]  # 95% CI lower bound
+    ci_upper_bottleneck: List[float]  # 95% CI upper bound
+    max_bottleneck_gas: List[int]     # Maximum observed across blocks
     
-    # Cross-strategy comparisons
-    best_strategy_per_thread_count: Dict[int, ParallelizationStrategy]
-    thread_count_recommendations: Dict[ParallelizationStrategy, int]
+    mean_speedup: List[float]         # Mean speedup across blocks
+    ci_lower_speedup: List[float]     # 95% CI lower bound for speedup
+    ci_upper_speedup: List[float]     # 95% CI upper bound for speedup
+    max_speedup: List[float]          # Maximum speedup observed
 
 
 class DependencyGraph:
@@ -192,7 +184,7 @@ class DependencyGraph:
 
 class ThreadCountPerformanceAnalyzer:
     """
-    Specialized analyzer for studying how thread count affects performance.
+    Analyzer for studying how thread count affects parallelization performance.
     This provides the core research functionality for thread scalability analysis.
     """
     
@@ -211,83 +203,45 @@ class ThreadCountPerformanceAnalyzer:
         transactions: List[TransactionData],
         dependencies: List[StateDependency],
         block_number: int,
-        thread_counts: Optional[List[int]] = None,
-        strategies: Optional[List[ParallelizationStrategy]] = None
-    ) -> MultiStrategyAnalysis:
+        thread_counts: Optional[List[int]] = None
+    ) -> ThreadCountAnalysis:
         """
-        Analyze how different thread counts affect performance across strategies.
+        Analyze how different thread counts affect parallelization performance.
         
         Args:
             transactions: List of transactions to analyze
             dependencies: List of dependencies between transactions
             block_number: Block number being analyzed
             thread_counts: List of thread counts to test (default: [1,2,4,8,16,32,64])
-            strategies: List of strategies to test (default: all strategies)
             
         Returns:
-            Comprehensive analysis across all strategies and thread counts
+            Comprehensive analysis across all thread counts
         """
         if thread_counts is None:
             thread_counts = [1, 2, 4, 8, 16, 32, 64]
         
-        if strategies is None:
-            strategies = list(ParallelizationStrategy)
-        
         self.logger.info(f"Analyzing thread scaling for block {block_number}: "
-                        f"{len(thread_counts)} thread counts × {len(strategies)} strategies")
-        
-        # Analyze each strategy across all thread counts
-        strategy_analyses = {}
-        for strategy in strategies:
-            analysis = self._analyze_strategy_scaling(
-                strategy, transactions, dependencies, block_number, thread_counts
-            )
-            strategy_analyses[strategy] = analysis
-        
-        # Perform cross-strategy analysis
-        best_per_thread = self._find_best_strategy_per_thread_count(strategy_analyses, thread_counts)
-        recommendations = self._generate_thread_count_recommendations(strategy_analyses)
-        
-        return MultiStrategyAnalysis(
-            block_number=block_number,
-            total_gas=sum(tx.gas_used for tx in transactions),
-            transaction_count=len(transactions),
-            dependency_count=len(dependencies),
-            strategy_analyses=strategy_analyses,
-            best_strategy_per_thread_count=best_per_thread,
-            thread_count_recommendations=recommendations
-        )
-    
-    def _analyze_strategy_scaling(
-        self,
-        strategy: ParallelizationStrategy,
-        transactions: List[TransactionData],
-        dependencies: List[StateDependency],
-        block_number: int,
-        thread_counts: List[int]
-    ) -> ThreadCountAnalysis:
-        """Analyze a single strategy across multiple thread counts."""
-        self.logger.info(f"Analyzing {strategy.value} across {len(thread_counts)} thread counts")
+                        f"{len(thread_counts)} thread counts")
         
         bottleneck_values = []
-        average_values = []
+        mean_values = []
         speedup_values = []
         efficiency_values = []
         
-        # Get sequential baseline for speedup calculation
-        sequential_result = self.simulator.simulate_strategy(
-            strategy, 1, transactions, dependencies, block_number
+        # Get sequential baseline (n=1) for speedup calculation
+        sequential_result = self.simulator.simulate(
+            1, transactions, dependencies, block_number
         )
         sequential_gas = sequential_result.sequential_gas
         
         # Test each thread count
         for thread_count in thread_counts:
-            result = self.simulator.simulate_strategy(
-                strategy, thread_count, transactions, dependencies, block_number
+            result = self.simulator.simulate(
+                thread_count, transactions, dependencies, block_number
             )
             
             bottleneck_values.append(result.bottleneck_gas)
-            average_values.append(result.average_gas)
+            mean_values.append(result.mean_gas)
             speedup_values.append(sequential_gas / result.bottleneck_gas if result.bottleneck_gas > 0 else 1.0)
             efficiency_values.append(result.thread_efficiency)
         
@@ -300,11 +254,10 @@ class ThreadCountPerformanceAnalyzer:
         diminishing_point = self._find_diminishing_returns_point(speedup_values, thread_counts)
         
         return ThreadCountAnalysis(
-            strategy=strategy,
             block_number=block_number,
             thread_counts=thread_counts,
             bottleneck_gas_values=bottleneck_values,
-            average_gas_values=average_values,
+            mean_gas_values=mean_values,
             speedup_values=speedup_values,
             efficiency_values=efficiency_values,
             optimal_thread_count=optimal_thread_count,
@@ -321,49 +274,11 @@ class ThreadCountPerformanceAnalyzer:
                 if improvement < 0.1:  # Less than 10% improvement
                     return thread_counts[i-1]
         return thread_counts[-1]  # If no diminishing returns found, return max
-    
-    def _find_best_strategy_per_thread_count(
-        self,
-        strategy_analyses: Dict[ParallelizationStrategy, ThreadCountAnalysis],
-        thread_counts: List[int]
-    ) -> Dict[int, ParallelizationStrategy]:
-        """Find the best strategy for each thread count."""
-        best_per_thread = {}
-        
-        for i, thread_count in enumerate(thread_counts):
-            best_strategy = None
-            best_speedup = 0.0
-            
-            for strategy, analysis in strategy_analyses.items():
-                speedup = analysis.speedup_values[i]
-                if speedup > best_speedup:
-                    best_speedup = speedup
-                    best_strategy = strategy
-            
-            best_per_thread[thread_count] = best_strategy
-        
-        return best_per_thread
-    
-    def _generate_thread_count_recommendations(
-        self,
-        strategy_analyses: Dict[ParallelizationStrategy, ThreadCountAnalysis]
-    ) -> Dict[ParallelizationStrategy, int]:
-        """Generate optimal thread count recommendations for each strategy."""
-        recommendations = {}
-        
-        for strategy, analysis in strategy_analyses.items():
-            # Recommend the thread count that provides best speedup before diminishing returns
-            if analysis.diminishing_returns_point <= analysis.optimal_thread_count:
-                recommendations[strategy] = analysis.diminishing_returns_point
-            else:
-                recommendations[strategy] = analysis.optimal_thread_count
-        
-        return recommendations
 
 
 class ParallelizationSimulator:
     """
-    Main simulator for testing different parallelization strategies.
+    Main simulator for testing parallelization performance across different thread counts.
     """
     
     def __init__(self):
@@ -371,19 +286,17 @@ class ParallelizationSimulator:
         self.logger = logging.getLogger(__name__)
         self.thread_analyzer = ThreadCountPerformanceAnalyzer(self)
     
-    def simulate_strategy(
+    def simulate(
         self,
-        strategy: ParallelizationStrategy,
         thread_count: int,
         transactions: List[TransactionData],
         dependencies: List[StateDependency],
         block_number: int
     ) -> ParallelizationResult:
         """
-        Simulate a specific parallelization strategy.
+        Simulate parallelization with the given thread count.
         
         Args:
-            strategy: The parallelization strategy to use
             thread_count: Number of threads to simulate
             transactions: List of transactions in the block
             dependencies: List of dependencies between transactions
@@ -392,25 +305,20 @@ class ParallelizationSimulator:
         Returns:
             Complete simulation result with performance metrics
         """
-        self.logger.info(f"Simulating {strategy.value} with {thread_count} threads on block {block_number}")
+        self.logger.info(f"Simulating parallelization with {thread_count} threads on block {block_number}")
         
         # Build dependency graph
         dep_graph = DependencyGraph(transactions, dependencies)
         
-        # Run strategy-specific allocation
-        if strategy == ParallelizationStrategy.SEQUENTIAL:
-            assignments = self._simulate_sequential(transactions)
-        elif strategy == ParallelizationStrategy.DEPENDENCY_AWARE:
-            assignments = self._simulate_dependency_aware(transactions, thread_count, dep_graph)
-        else:
-            raise ValueError(f"Unknown strategy: {strategy}")
+        # Run parallelization allocation
+        assignments = self._allocate_transactions(transactions, thread_count, dep_graph)
         
         # Calculate thread metrics
         thread_metrics = self._calculate_thread_metrics(assignments, thread_count)
         
         # Calculate aggregate metrics
         return self._calculate_aggregate_metrics(
-            strategy, thread_count, block_number, thread_metrics, transactions
+            thread_count, block_number, thread_metrics, transactions
         )
     
     def analyze_thread_count_performance(
@@ -418,38 +326,24 @@ class ParallelizationSimulator:
         transactions: List[TransactionData],
         dependencies: List[StateDependency],
         block_number: int,
-        thread_counts: Optional[List[int]] = None,
-        strategies: Optional[List[ParallelizationStrategy]] = None
-    ) -> MultiStrategyAnalysis:
+        thread_counts: Optional[List[int]] = None
+    ) -> ThreadCountAnalysis:
         """
         Convenience method for thread count performance analysis.
         
         This is the main entry point for the research functionality.
         """
         return self.thread_analyzer.analyze_thread_scaling(
-            transactions, dependencies, block_number, thread_counts, strategies
+            transactions, dependencies, block_number, thread_counts
         )
     
-    def _simulate_sequential(self, transactions: List[TransactionData]) -> List[TransactionAssignment]:
-        """Simulate sequential execution (baseline)."""
-        assignments = []
-        for i, tx in enumerate(transactions):
-            assignments.append(TransactionAssignment(
-                tx_hash=tx.hash,
-                tx_index=tx.transaction_index,
-                thread_id=0,
-                gas_used=tx.gas_used,
-                execution_order=i
-            ))
-        return assignments
-    
-    def _simulate_dependency_aware(
+    def _allocate_transactions(
         self,
         transactions: List[TransactionData],
         thread_count: int,
         dep_graph: DependencyGraph
     ) -> List[TransactionAssignment]:
-        """Simulate dependency-aware batching using topological sorting."""
+        """Allocate transactions to threads using dependency-aware approach."""
         # Get dependency chains
         chains = dep_graph.get_dependency_chains()
         independent = dep_graph.get_independent_transactions()
@@ -524,7 +418,6 @@ class ParallelizationSimulator:
     
     def _calculate_aggregate_metrics(
         self,
-        strategy: ParallelizationStrategy,
         thread_count: int,
         block_number: int,
         thread_metrics: List[ThreadMetrics],
@@ -536,25 +429,24 @@ class ParallelizationSimulator:
         if not gas_values:
             # Edge case: no transactions
             bottleneck_gas = 0
-            average_gas = 0.0
+            mean_gas = 0.0
             thread_efficiency = 1.0
         else:
             bottleneck_gas = max(gas_values)
-            average_gas = sum(gas_values) / len(gas_values)
+            mean_gas = sum(gas_values) / len(gas_values)
             thread_efficiency = min(gas_values) / bottleneck_gas if bottleneck_gas > 0 else 1.0
         
         total_gas = sum(tx.gas_used for tx in transactions)
         sequential_gas = total_gas  # All gas on one thread
         parallel_speedup = sequential_gas / bottleneck_gas if bottleneck_gas > 0 else 1.0
-        utilization_efficiency = average_gas / bottleneck_gas if bottleneck_gas > 0 else 1.0
+        utilization_efficiency = mean_gas / bottleneck_gas if bottleneck_gas > 0 else 1.0
         
         return ParallelizationResult(
-            strategy=strategy,
             thread_count=thread_count,
             block_number=block_number,
             thread_metrics=thread_metrics,
             bottleneck_gas=bottleneck_gas,
-            average_gas=average_gas,
+            mean_gas=mean_gas,
             thread_efficiency=thread_efficiency,
             conflict_rate=0.0,  # TODO: Implement conflict detection
             total_conflicts=0,

@@ -115,7 +115,7 @@ def create_parser():
     # analyze parallelization
     parallel_parser = analyze_subs.add_parser(
         'parallelization',
-        help='Analyze parallelization strategies and thread count performance'
+        help='Analyze parallelization thread count performance'
     )
     parallel_parser.add_argument(
         '--block',
@@ -125,14 +125,8 @@ def create_parser():
     parallel_parser.add_argument(
         '--threads',
         type=str,
-        default='1,2,4,8,16,32',
-        help='Comma-separated thread counts to test (default: 1,2,4,8,16,32)'
-    )
-    parallel_parser.add_argument(
-        '--strategies',
-        type=str,
-        default='all',
-        help='Parallelization strategies to compare: all, sequential, dependency-aware (default: all). Use comma-separated for multiple.'
+        default='1,2,4,8,16,32,64',
+        help='Comma-separated thread counts to test (default: 1,2,4,8,16,32,64)'
     )
     parallel_parser.add_argument(
         '--multi-block',
@@ -159,14 +153,8 @@ def create_parser():
     aggregate_parser.add_argument(
         '--thread-counts',
         type=str,
-        default='1,2,4,8,16,32',
-        help='Comma-separated thread counts to test (default: 1,2,4,8,16,32)'
-    )
-    aggregate_parser.add_argument(
-        '--strategies',
-        type=str,
-        default='all',
-        help='Parallelization strategies: all, sequential, dependency-aware (default: all)'
+        default='1,2,4,8,16,32,64',
+        help='Comma-separated thread counts to test (default: 1,2,4,8,16,32,64)'
     )
     aggregate_parser.add_argument(
         '--output-dir',
