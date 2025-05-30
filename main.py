@@ -92,8 +92,8 @@ def create_parser():
     continuous_parser.add_argument(
         '--blocks',
         type=int,
-        default=10,
-        help='Number of recent blocks to analyze (default: 10)'
+        default=None,
+        help='Number of recent blocks to analyze (default: all blocks)'
     )
     
     # analyze chain
