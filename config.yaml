@@ -1,0 +1,81 @@
+# Ethereum Transaction Dependency Analysis Configuration
+
+# Ethereum Node Configuration
+ethereum:
+  # Node type: 'geth' or 'reth'
+  node_type: 'geth'
+  
+  # Node connection settings
+  rpc_url: 'http://10.0.30.105:8545'
+  ws_url: 'ws://10.0.30.105:8546'
+  
+  # API modules required
+  required_modules: ['eth', 'net', 'web3', 'debug']
+  
+  # Request timeout in seconds
+  timeout: 30
+
+# Database Configuration
+database:
+  # Database type: 'sqlite' or 'postgresql'
+  type: 'sqlite'
+  
+  # SQLite settings
+  sqlite:
+    path: './data/ethereum_deps.db'
+  
+  # PostgreSQL settings (for future use)
+  postgresql:
+    host: 'localhost'
+    port: 5432
+    database: 'ethereum_deps'
+    username: 'postgres'
+    password: 'password'
+
+# Analysis Configuration
+analysis:
+  # Maximum number of transactions to analyze per block
+  max_transactions_per_block: 1000
+  
+  # Whether to include contract creation transactions
+  include_contract_creation: true
+  
+  # Whether to analyze internal transactions
+  analyze_internal_transactions: true
+  
+  # Gas threshold for dependency tracking (ignore very small transactions)
+  min_gas_threshold: 21000
+
+# Visualization Configuration
+visualization:
+  # Output directory for graphs
+  output_dir: './data/graphs'
+  
+  # Graph format: 'png', 'svg', 'pdf'
+  format: 'png'
+  
+  # Maximum nodes to display in a single graph
+  max_nodes: 100
+  
+  # Layout algorithm: 'spring', 'circular', 'hierarchical'
+  layout: 'spring'
+
+# Logging Configuration
+logging:
+  level: 'INFO'
+  file: './logs/analysis.log'
+  format: '%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+
+# Continuous Collection Configuration
+collection:
+  # How many blocks back from latest to consider (max 128 for Geth path scheme)
+  lookback_blocks: 100
+  
+  # How often to check for new blocks (seconds)
+  check_interval: 60
+  
+  # Number of parallel workers for analysis
+  max_workers: 4
+  
+  # Buffer blocks to leave for finalization
+  finalization_buffer: 5 
