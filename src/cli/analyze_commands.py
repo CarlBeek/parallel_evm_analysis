@@ -91,6 +91,12 @@ def handle_analyze(args):
             return 1
         
         return analyze_biggest_transactions(args.limit, args.output_file)
+    elif args.analyze_cmd == 'gas-cdf':
+        if not PARALLELIZATION_AVAILABLE:
+            print("❌ Database analysis modules not available")
+            return 1
+        
+        return analyze_gas_cdf(args.output_dir, args.max_gas, args.sample_points, args.log_scale, args.zoom_threshold)
     else:
         print("❌ No analyze operation specified. Use --help for options.")
         return 1
@@ -1914,3 +1920,363 @@ def analyze_biggest_transactions(limit=10, output_file=None):
             database.close()
         except:
             pass 
+
+
+def analyze_gas_cdf(output_dir='./data/graphs', max_gas=None, sample_points=10000, log_scale=False, zoom_threshold=1000000):
+    """
+    Generate a cumulative distribution function (CDF) plot for transaction gas usage.
+    This shows what percentage of transactions are below each gas usage threshold.
+    """
+    print(f"📊 Generating gas usage CDF plot...")
+    
+    try:
+        from pathlib import Path
+        import plotly.graph_objects as go
+        import numpy as np
+        
+        database = BlockchainDatabase()
+        
+        # Check available data
+        stats = database.get_database_stats()
+        total_blocks = stats.get('block_count', 0)
+        
+        if total_blocks == 0:
+            print("❌ No blocks found in database. Run data collection first.")
+            return 1
+        
+        print(f"📊 Found {total_blocks} blocks in database")
+        print(f"   Block range: {stats.get('block_range', {})}")
+        
+        # Query all transaction gas usage
+        print(f"🔄 Loading all transaction gas usage data...")
+        
+        cursor = database.connection.cursor()
+        
+        # Get all transaction gas usage values
+        query = """
+            SELECT gas_used 
+            FROM transactions 
+            WHERE gas_used IS NOT NULL AND gas_used > 0
+            ORDER BY gas_used ASC
+        """
+        
+        cursor.execute(query)
+        results = cursor.fetchall()
+        
+        if not results:
+            print(f"❌ No transaction gas usage data found")
+            return 1
+        
+        # Extract gas values
+        gas_values = [row[0] for row in results]
+        total_transactions = len(gas_values)
+        
+        print(f"📈 Loaded {total_transactions:,} transactions with gas data")
+        print(f"   Min gas: {min(gas_values):,}")
+        print(f"   Max gas: {max(gas_values):,}")
+        print(f"   Median gas: {sorted(gas_values)[len(gas_values)//2]:,}")
+        
+        # Set max_gas if not provided
+        if max_gas is None:
+            max_gas = max(gas_values)
+        else:
+            # Filter values above max_gas
+            filtered_count = len([g for g in gas_values if g <= max_gas])
+            print(f"   Filtering to {max_gas:,} gas (includes {filtered_count:,}/{total_transactions:,} transactions)")
+            gas_values = [g for g in gas_values if g <= max_gas]
+        
+        # Create CDF data
+        print(f"📊 Computing true CDF from sorted data...")
+        
+        # Sort the gas values for true CDF calculation
+        sorted_gas = np.array(sorted(gas_values))
+        
+        # Create cumulative percentages for the true CDF
+        n = len(sorted_gas)
+        cumulative_percentages_true = np.arange(1, n + 1) / n * 100
+        
+        # For visualization, we'll sample points to keep the plot manageable
+        # Use the sample_points parameter to determine how many points to show
+        if len(sorted_gas) > sample_points:
+            # Sample evenly spaced indices
+            sample_indices = np.linspace(0, len(sorted_gas) - 1, sample_points, dtype=int)
+            gas_values_sampled = sorted_gas[sample_indices]
+            cumulative_percentages_sampled = cumulative_percentages_true[sample_indices]
+        else:
+            # Use all points if dataset is smaller than sample size
+            gas_values_sampled = sorted_gas
+            cumulative_percentages_sampled = cumulative_percentages_true
+        
+        # Create the plot
+        print(f"🎨 Creating CDF visualization...")
+        
+        # Create multiple figures for better readability
+        figures = []
+        
+        # 1. Full range CDF (with optional log scale)
+        full_fig = go.Figure()
+        
+        # Main CDF line
+        full_fig.add_trace(
+            go.Scatter(
+                x=gas_values_sampled,
+                y=cumulative_percentages_sampled,
+                mode='lines',
+                name='Transaction Gas CDF',
+                line=dict(color='blue', width=3),
+                customdata=np.arange(1, len(gas_values_sampled) + 1),
+                hovertemplate='<b>Gas Usage CDF</b><br>' +
+                            'Gas Threshold: %{x:,}<br>' +
+                            'Transactions Below: %{y:.1f}%<br>' +
+                            'Count: %{customdata:,}<br>' +
+                            '<extra></extra>'
+            )
+        )
+        
+        # Add key percentile lines
+        percentiles = [50, 75, 90, 95, 99]
+        percentile_gas_values = np.percentile(gas_values, percentiles)
+        
+        for i, (p, gas_val) in enumerate(zip(percentiles, percentile_gas_values)):
+            full_fig.add_vline(
+                x=gas_val,
+                line_dash="dash",
+                line_color=f"rgba(255, {100 + i*30}, {50 + i*20}, 0.7)",
+                annotation_text=f"{p}th percentile<br>{gas_val:,.0f} gas",
+                annotation_position="top"
+            )
+        
+        # Add summary statistics as annotations
+        mean_gas = np.mean(gas_values)
+        median_gas = np.median(gas_values)
+        
+        full_fig.add_annotation(
+            text=f"📊 Gas Usage Statistics<br>" +
+                 f"Total Transactions: {len(gas_values):,}<br>" +
+                 f"Mean: {mean_gas:,.0f} gas<br>" +
+                 f"Median: {median_gas:,.0f} gas<br>" +
+                 f"Max: {max(gas_values):,} gas<br>" +
+                 f"Range: 0 to {max_gas:,} gas",
+            xref="paper", yref="paper",
+            x=0.02, y=0.02,
+            showarrow=False,
+            bgcolor="rgba(255,255,255,0.9)",
+            bordercolor="gray",
+            borderwidth=1,
+            font=dict(size=12)
+        )
+        
+        # Update layout for full figure
+        x_axis_type = 'log' if log_scale else 'linear'
+        title_suffix = " (Log Scale)" if log_scale else ""
+        x_axis_title = "Gas Usage (🚨 Log Scale 🚨)" if log_scale else "Gas Usage"
+        
+        full_fig.update_layout(
+            title=dict(
+                text=f"Transaction Gas Usage Distribution (CDF){title_suffix}<br>" +
+                     f"<sub>{len(gas_values):,} transactions across {total_blocks:,} blocks</sub>",
+                x=0.5,
+                font=dict(size=18)
+            ),
+            xaxis=dict(
+                title=x_axis_title,
+                title_font=dict(size=14),
+                tickfont=dict(size=12),
+                showgrid=True,
+                gridcolor='lightgray',
+                type=x_axis_type
+            ),
+            yaxis=dict(
+                title="Cumulative Percentage (%)",
+                title_font=dict(size=14),
+                tickfont=dict(size=12),
+                showgrid=True,
+                gridcolor='lightgray',
+                range=[0, 100]
+            ),
+            height=600,
+            width=1000,
+            plot_bgcolor='white',
+            paper_bgcolor='white',
+            hovermode='x unified'
+        )
+        
+        figures.append(('full', full_fig))
+        
+        # 2. Zoomed CDF focusing on main distribution
+        if zoom_threshold:
+            print(f"🔍 Creating zoomed view (up to {zoom_threshold:,} gas)...")
+            
+            # Filter data for zoom using true CDF approach
+            zoom_mask = sorted_gas <= zoom_threshold
+            zoom_gas_values = sorted_gas[zoom_mask]
+            zoom_cumulative_percentages = cumulative_percentages_true[zoom_mask]
+            zoom_percentage = len(zoom_gas_values) / len(gas_values) * 100
+            
+            # Sample points for zoomed view if needed
+            if len(zoom_gas_values) > sample_points:
+                zoom_sample_indices = np.linspace(0, len(zoom_gas_values) - 1, sample_points, dtype=int)
+                zoom_gas_sampled = zoom_gas_values[zoom_sample_indices]
+                zoom_cumulative_sampled = zoom_cumulative_percentages[zoom_sample_indices]
+            else:
+                zoom_gas_sampled = zoom_gas_values
+                zoom_cumulative_sampled = zoom_cumulative_percentages
+            
+            # Create zoomed figure
+            zoom_fig = go.Figure()
+            
+            # Main CDF line (zoomed)
+            zoom_fig.add_trace(
+                go.Scatter(
+                    x=zoom_gas_sampled,
+                    y=zoom_cumulative_sampled,
+                    mode='lines',
+                    name='Transaction Gas CDF (Zoomed)',
+                    line=dict(color='green', width=3),
+                    customdata=np.arange(1, len(zoom_gas_sampled) + 1),
+                    hovertemplate='<b>Gas Usage CDF (Zoomed)</b><br>' +
+                                'Gas Threshold: %{x:,}<br>' +
+                                'Transactions Below: %{y:.1f}%<br>' +
+                                'Count: %{customdata:,}<br>' +
+                                '<extra></extra>'
+                )
+            )
+            
+            # Add percentile lines for zoomed view
+            zoom_percentiles = [10, 25, 50, 75, 90]
+            zoom_percentile_values = np.percentile(gas_values, zoom_percentiles)
+            
+            for i, (p, gas_val) in enumerate(zip(zoom_percentiles, zoom_percentile_values)):
+                if gas_val <= zoom_threshold:
+                    zoom_fig.add_vline(
+                        x=gas_val,
+                        line_dash="dash",
+                        line_color=f"rgba(50, {150 + i*20}, 50, 0.8)",
+                        annotation_text=f"{p}th<br>{gas_val:,.0f}",
+                        annotation_position="top right"
+                    )
+            
+            # Add histogram to show actual distribution density
+            hist_bins = np.linspace(0, zoom_threshold, 50)
+            hist_counts, hist_edges = np.histogram(zoom_gas_values, bins=hist_bins)
+            hist_percentages = hist_counts / len(gas_values) * 100
+            
+            zoom_fig.add_trace(
+                go.Bar(
+                    x=hist_edges[:-1],
+                    y=hist_percentages,
+                    width=(hist_edges[1] - hist_edges[0]) * 0.8,
+                    name='Distribution Density',
+                    opacity=0.3,
+                    marker_color='orange',
+                    yaxis='y2',
+                    hovertemplate='<b>Gas Range Density</b><br>' +
+                                'Gas Range: %{x:,} - %{x2:,}<br>' +
+                                'Percentage: %{y:.2f}%<br>' +
+                                '<extra></extra>',
+                    customdata=hist_edges[1:]
+                )
+            )
+            
+            # Update layout for zoomed figure
+            zoom_fig.update_layout(
+                title=dict(
+                    text=f"Transaction Gas Usage Distribution - Detailed View<br>" +
+                         f"<sub>Focus on 0-{zoom_threshold:,} gas ({zoom_percentage:.1f}% of transactions)</sub>",
+                    x=0.5,
+                    font=dict(size=18)
+                ),
+                xaxis=dict(
+                    title="Gas Usage",
+                    title_font=dict(size=14),
+                    tickfont=dict(size=12),
+                    showgrid=True,
+                    gridcolor='lightgray',
+                    range=[0, zoom_threshold]
+                ),
+                yaxis=dict(
+                    title="Cumulative Percentage (%)",
+                    title_font=dict(size=14, color='green'),
+                    tickfont=dict(size=12, color='green'),
+                    showgrid=True,
+                    gridcolor='lightgray',
+                    range=[0, zoom_percentage + 5]
+                ),
+                yaxis2=dict(
+                    title="Distribution Density (%)",
+                    title_font=dict(size=14, color='orange'),
+                    tickfont=dict(size=12, color='orange'),
+                    overlaying='y',
+                    side='right',
+                    range=[0, max(hist_percentages) * 1.1]
+                ),
+                height=600,
+                width=1000,
+                plot_bgcolor='white',
+                paper_bgcolor='white',
+                hovermode='x unified'
+            )
+            
+            figures.append(('zoomed', zoom_fig))
+        
+        # Save all figures
+        output_path = Path(output_dir)
+        output_path.mkdir(parents=True, exist_ok=True)
+        
+        saved_files = []
+        for fig_type, figure in figures:
+            if fig_type == 'full':
+                scale_suffix = "_log" if log_scale else ""
+                filename = f"gas_usage_cdf{scale_suffix}_{total_blocks}_blocks.html"
+            else:
+                filename = f"gas_usage_cdf_zoomed_{zoom_threshold//1000}k_{total_blocks}_blocks.html"
+            
+            filepath = output_path / filename
+            figure.write_html(
+                str(filepath),
+                include_plotlyjs=True,
+                config={'displayModeBar': True, 'displaylogo': False}
+            )
+            saved_files.append(str(filepath))
+        
+        print(f"✅ Gas CDF plots saved:")
+        for filepath in saved_files:
+            print(f"   📊 {filepath}")
+        
+        # Print key insights
+        print(f"\n💡 Key Insights:")
+        print(f"   50% of transactions use ≤ {percentile_gas_values[0]:,.0f} gas")
+        print(f"   75% of transactions use ≤ {percentile_gas_values[1]:,.0f} gas")
+        print(f"   90% of transactions use ≤ {percentile_gas_values[2]:,.0f} gas")
+        print(f"   95% of transactions use ≤ {percentile_gas_values[3]:,.0f} gas")
+        print(f"   99% of transactions use ≤ {percentile_gas_values[4]:,.0f} gas")
+        
+        # Analyze distribution characteristics
+        small_tx_threshold = 100000  # 100k gas
+        medium_tx_threshold = 500000  # 500k gas
+        large_tx_threshold = 1000000  # 1M gas
+        
+        small_tx_count = len([g for g in gas_values if g <= small_tx_threshold])
+        medium_tx_count = len([g for g in gas_values if small_tx_threshold < g <= medium_tx_threshold])
+        large_tx_count = len([g for g in gas_values if medium_tx_threshold < g <= large_tx_threshold])
+        huge_tx_count = len([g for g in gas_values if g > large_tx_threshold])
+        
+        print(f"\n📊 Distribution Breakdown:")
+        print(f"   Small (≤{small_tx_threshold:,}): {small_tx_count:,} ({small_tx_count/len(gas_values)*100:.1f}%)")
+        print(f"   Medium ({small_tx_threshold:,}-{medium_tx_threshold:,}): {medium_tx_count:,} ({medium_tx_count/len(gas_values)*100:.1f}%)")
+        print(f"   Large ({medium_tx_threshold:,}-{large_tx_threshold:,}): {large_tx_count:,} ({large_tx_count/len(gas_values)*100:.1f}%)")
+        print(f"   Huge (>{large_tx_threshold:,}): {huge_tx_count:,} ({huge_tx_count/len(gas_values)*100:.1f}%)")
+        
+        print(f"\n✅ Gas CDF analysis complete!")
+        return 0
+        
+    except Exception as e:
+        print(f"❌ Error in gas CDF analysis: {e}")
+        import traceback
+        traceback.print_exc()
+        return 1
+    finally:
+        try:
+            database.close()
+        except:
+            pass

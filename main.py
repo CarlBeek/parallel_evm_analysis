@@ -239,6 +239,41 @@ def create_parser():
         help='Optional CSV file to save results (default: print to console)'
     )
     
+    # analyze gas-cdf (cumulative distribution function of transaction gas usage)
+    gas_cdf_parser = analyze_subs.add_parser(
+        'gas-cdf',
+        help='Generate cumulative distribution function (CDF) of transaction gas usage'
+    )
+    gas_cdf_parser.add_argument(
+        '--output-dir',
+        type=str,
+        default='./data/graphs',
+        help='Directory to save graph output (default: ./data/graphs)'
+    )
+    gas_cdf_parser.add_argument(
+        '--max-gas',
+        type=int,
+        default=None,
+        help='Maximum gas value to include in CDF (default: auto-detect)'
+    )
+    gas_cdf_parser.add_argument(
+        '--sample-points',
+        type=int,
+        default=10000,
+        help='Number of sample points for smooth CDF visualization (default: 10000)'
+    )
+    gas_cdf_parser.add_argument(
+        '--log-scale',
+        action='store_true',
+        help='Use logarithmic scale for x-axis to better show distribution'
+    )
+    gas_cdf_parser.add_argument(
+        '--zoom-threshold',
+        type=int,
+        default=1000000,
+        help='Create additional zoomed chart up to this gas threshold (default: 1,000,000)'
+    )
+    
     # COLLECT command group
     collect_parser = subparsers.add_parser(
         'collect',
