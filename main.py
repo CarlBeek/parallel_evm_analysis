@@ -222,6 +222,23 @@ def create_parser():
         help='Optional CSV file to save results (default: print to console)'
     )
     
+    # analyze biggest-txs (find largest transactions by gas usage)
+    biggest_txs_parser = analyze_subs.add_parser(
+        'biggest-txs',
+        help='Find the largest transactions by gas usage across all blocks'
+    )
+    biggest_txs_parser.add_argument(
+        '--limit',
+        type=int,
+        default=10,
+        help='Number of biggest transactions to display (default: 10)'
+    )
+    biggest_txs_parser.add_argument(
+        '--output-file',
+        type=str,
+        help='Optional CSV file to save results (default: print to console)'
+    )
+    
     # COLLECT command group
     collect_parser = subparsers.add_parser(
         'collect',

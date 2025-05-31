@@ -79,6 +79,18 @@ def handle_analyze(args):
             return 1
         
         return analyze_state_diff_only(thread_counts, args.output_dir)
+    elif args.analyze_cmd == 'gas-dominance':
+        if not PARALLELIZATION_AVAILABLE:
+            print("❌ Database analysis modules not available")
+            return 1
+        
+        return analyze_gas_dominance(args.threshold, args.limit, args.output_file)
+    elif args.analyze_cmd == 'biggest-txs':
+        if not PARALLELIZATION_AVAILABLE:
+            print("❌ Database analysis modules not available")
+            return 1
+        
+        return analyze_biggest_transactions(args.limit, args.output_file)
     else:
         print("❌ No analyze operation specified. Use --help for options.")
         return 1
@@ -1532,4 +1544,373 @@ def analyze_state_diff_only(thread_counts=None, output_dir='./data/graphs'):
         print(f"❌ Error in state-diff analysis: {e}")
         import traceback
         traceback.print_exc()
-        return 1 
+        return 1
+
+
+def analyze_gas_dominance(threshold=95.0, limit=50, output_file=None):
+    """
+    Find blocks where a single transaction uses more than the specified percentage of total gas.
+    This helps identify blocks dominated by extremely large transactions.
+    """
+    print(f"🔍 Analyzing gas dominance (threshold: {threshold}%)...")
+    
+    try:
+        database = BlockchainDatabase()
+        
+        # Check available data
+        stats = database.get_database_stats()
+        total_blocks = stats.get('block_count', 0)
+        
+        if total_blocks == 0:
+            print("❌ No blocks found in database. Run data collection first.")
+            return 1
+        
+        print(f"📊 Found {total_blocks} blocks in database")
+        print(f"   Block range: {stats.get('block_range', {})}")
+        
+        # Query blocks and find gas-dominant transactions
+        print(f"🔄 Scanning blocks for transactions using >{threshold}% of block gas...")
+        
+        cursor = database.connection.cursor()
+        
+        # Get all blocks with their transaction data
+        query = """
+            SELECT 
+                b.number as block_number,
+                b.gas_used as block_gas_used,
+                b.gas_limit as block_gas_limit,
+                b.transaction_count,
+                b.timestamp,
+                MAX(t.gas_used) as max_tx_gas_used,
+                t.hash as dominant_tx_hash,
+                t.from_address,
+                t.to_address,
+                t.value,
+                t.gas_price
+            FROM blocks b
+            LEFT JOIN transactions t ON b.number = t.block_number
+            WHERE t.gas_used IS NOT NULL
+            GROUP BY b.number
+            HAVING (MAX(t.gas_used) * 100.0 / b.gas_used) > ?
+            ORDER BY (MAX(t.gas_used) * 100.0 / b.gas_used) DESC
+            LIMIT ?
+        """
+        
+        cursor.execute(query, (threshold, limit))
+        results = cursor.fetchall()
+        
+        if not results:
+            print(f"✅ No blocks found where a single transaction uses >{threshold}% of gas")
+            return 0
+        
+        print(f"\n🎯 Found {len(results)} blocks with gas-dominant transactions:")
+        print("=" * 120)
+        
+        # Prepare data for display
+        dominant_blocks = []
+        
+        for row in results:
+            block_number = row[0]
+            block_gas_used = row[1]
+            block_gas_limit = row[2]
+            transaction_count = row[3]
+            timestamp = row[4]
+            max_tx_gas = row[5]
+            tx_hash = row[6]
+            from_addr = row[7]
+            to_addr = row[8]
+            value = row[9]
+            gas_price = row[10]
+            
+            # Calculate gas dominance percentage
+            gas_percentage = (max_tx_gas / block_gas_used * 100) if block_gas_used > 0 else 0
+            
+            dominant_blocks.append({
+                'block_number': block_number,
+                'gas_percentage': gas_percentage,
+                'max_tx_gas': max_tx_gas,
+                'block_gas_used': block_gas_used,
+                'block_gas_limit': block_gas_limit,
+                'transaction_count': transaction_count,
+                'tx_hash': tx_hash,
+                'from_address': from_addr,
+                'to_address': to_addr,
+                'value': value,
+                'gas_price': gas_price,
+                'timestamp': timestamp
+            })
+        
+        # Display results
+        print(f"{'Block':<10} {'Gas %':<8} {'TX Gas':<12} {'Block Gas':<12} {'TXs':<5} {'TX Hash':<20} {'From':<15} {'To':<15}")
+        print("-" * 120)
+        
+        for block in dominant_blocks[:limit]:
+            print(f"{block['block_number']:<10} "
+                  f"{block['gas_percentage']:<8.1f} "
+                  f"{block['max_tx_gas']:<12,} "
+                  f"{block['block_gas_used']:<12,} "
+                  f"{block['transaction_count']:<5} "
+                  f"{block['tx_hash'][:18]:<20} "
+                  f"{block['from_address'][:13]:<15} "
+                  f"{block['to_address'][:13] if block['to_address'] else 'N/A':<15}")
+        
+        # Summary statistics
+        gas_percentages = [block['gas_percentage'] for block in dominant_blocks]
+        avg_percentage = sum(gas_percentages) / len(gas_percentages)
+        max_percentage = max(gas_percentages)
+        
+        print("\n📈 Summary Statistics:")
+        print(f"   Blocks found: {len(dominant_blocks)}")
+        print(f"   Average gas dominance: {avg_percentage:.1f}%")
+        print(f"   Maximum gas dominance: {max_percentage:.1f}%")
+        print(f"   Threshold used: {threshold}%")
+        
+        # Most extreme case details
+        if dominant_blocks:
+            extreme_block = dominant_blocks[0]
+            print(f"\n🔥 Most Extreme Case:")
+            print(f"   Block {extreme_block['block_number']}: {extreme_block['gas_percentage']:.1f}% gas dominance")
+            print(f"   Transaction: {extreme_block['tx_hash']}")
+            print(f"   Gas used: {extreme_block['max_tx_gas']:,} / {extreme_block['block_gas_used']:,}")
+            print(f"   From: {extreme_block['from_address']}")
+            print(f"   To: {extreme_block['to_address'] or 'Contract Creation'}")
+            if extreme_block['value']:
+                try:
+                    value_wei = int(extreme_block['value']) if extreme_block['value'] else 0
+                    if value_wei > 0:
+                        print(f"   Value: {value_wei / 1e18:.4f} ETH")
+                except (ValueError, TypeError):
+                    print(f"   Value: {extreme_block['value']} (raw)")
+            else:
+                print(f"   Value: 0 ETH")
+        
+        # Save to CSV if requested
+        if output_file:
+            import csv
+            with open(output_file, 'w', newline='') as csvfile:
+                fieldnames = [
+                    'block_number', 'gas_percentage', 'max_tx_gas', 'block_gas_used', 
+                    'block_gas_limit', 'transaction_count', 'tx_hash', 'from_address', 
+                    'to_address', 'value', 'gas_price', 'timestamp'
+                ]
+                writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
+                writer.writeheader()
+                writer.writerows(dominant_blocks)
+            
+            print(f"\n💾 Results saved to: {output_file}")
+        
+        print(f"\n✅ Gas dominance analysis complete!")
+        return 0
+        
+    except Exception as e:
+        print(f"❌ Error in gas dominance analysis: {e}")
+        import traceback
+        traceback.print_exc()
+        return 1
+    finally:
+        try:
+            database.close()
+        except:
+            pass 
+
+
+def analyze_biggest_transactions(limit=10, output_file=None):
+    """
+    Find the largest transactions by gas usage across all blocks in the database.
+    This helps identify the most gas-intensive operations in the blockchain.
+    """
+    print(f"🔍 Finding the {limit} biggest transactions by gas usage...")
+    
+    try:
+        database = BlockchainDatabase()
+        
+        # Check available data
+        stats = database.get_database_stats()
+        total_blocks = stats.get('block_count', 0)
+        
+        if total_blocks == 0:
+            print("❌ No blocks found in database. Run data collection first.")
+            return 1
+        
+        print(f"📊 Found {total_blocks} blocks in database")
+        print(f"   Block range: {stats.get('block_range', {})}")
+        
+        # Query for the biggest transactions
+        print(f"🔄 Scanning all transactions for the {limit} largest by gas usage...")
+        
+        cursor = database.connection.cursor()
+        
+        # Get the biggest transactions across all blocks
+        query = """
+            SELECT 
+                t.hash as tx_hash,
+                t.block_number,
+                t.transaction_index,
+                t.gas_used,
+                t.gas as gas_limit,
+                t.from_address,
+                t.to_address,
+                t.value,
+                t.gas_price,
+                b.gas_used as block_gas_used,
+                b.transaction_count as block_tx_count,
+                b.timestamp
+            FROM transactions t
+            LEFT JOIN blocks b ON t.block_number = b.number
+            WHERE t.gas_used IS NOT NULL AND t.gas_used > 0
+            ORDER BY t.gas_used DESC
+            LIMIT ?
+        """
+        
+        cursor.execute(query, (limit,))
+        results = cursor.fetchall()
+        
+        if not results:
+            print(f"❌ No transactions found with gas usage data")
+            return 1
+        
+        print(f"\n🎯 Found {len(results)} biggest transactions:")
+        print("=" * 150)
+        
+        # Prepare data for display
+        biggest_transactions = []
+        
+        for i, row in enumerate(results, 1):
+            tx_hash = row[0]
+            block_number = row[1]
+            tx_index = row[2]
+            gas_used = row[3]
+            gas_limit = row[4]
+            from_addr = row[5]
+            to_addr = row[6]
+            value = row[7]
+            gas_price = row[8]
+            block_gas_used = row[9]
+            block_tx_count = row[10]
+            timestamp = row[11]
+            
+            # Calculate percentage of block gas this transaction used
+            block_gas_percentage = (gas_used / block_gas_used * 100) if block_gas_used > 0 else 0
+            
+            # Calculate gas efficiency (gas used vs gas limit)
+            gas_efficiency = (gas_used / gas_limit * 100) if gas_limit > 0 else 0
+            
+            biggest_transactions.append({
+                'rank': i,
+                'tx_hash': tx_hash,
+                'block_number': block_number,
+                'transaction_index': tx_index,
+                'gas_used': gas_used,
+                'gas_limit': gas_limit,
+                'gas_efficiency': gas_efficiency,
+                'from_address': from_addr,
+                'to_address': to_addr,
+                'value': value,
+                'gas_price': gas_price,
+                'block_gas_used': block_gas_used,
+                'block_gas_percentage': block_gas_percentage,
+                'block_tx_count': block_tx_count,
+                'timestamp': timestamp
+            })
+        
+        # Display results
+        print(f"{'#':<3} {'Gas Used':<12} {'Block':<10} {'TX#':<4} {'Gas%':<6} {'Eff%':<5} {'TX Hash':<66} {'From':<15} {'To':<15}")
+        print("-" * 150)
+        
+        for tx in biggest_transactions:
+            print(f"{tx['rank']:<3} "
+                  f"{tx['gas_used']:<12,} "
+                  f"{tx['block_number']:<10} "
+                  f"{tx['transaction_index']:<4} "
+                  f"{tx['block_gas_percentage']:<6.1f} "
+                  f"{tx['gas_efficiency']:<5.1f} "
+                  f"{tx['tx_hash']:<66} "
+                  f"{tx['from_address'][:13]:<15} "
+                  f"{tx['to_address'][:13] if tx['to_address'] else 'CREATE':<15}")
+        
+        # Summary statistics
+        gas_values = [tx['gas_used'] for tx in biggest_transactions]
+        total_gas = sum(gas_values)
+        avg_gas = total_gas / len(gas_values)
+        median_gas = sorted(gas_values)[len(gas_values) // 2]
+        
+        print(f"\n📈 Summary Statistics:")
+        print(f"   Transactions analyzed: {len(biggest_transactions)}")
+        print(f"   Largest transaction: {max(gas_values):,} gas")
+        print(f"   Smallest in top {limit}: {min(gas_values):,} gas")
+        print(f"   Average in top {limit}: {avg_gas:,.0f} gas")
+        print(f"   Median in top {limit}: {median_gas:,} gas")
+        print(f"   Total gas (top {limit}): {total_gas:,} gas")
+        
+        # Most extreme case details
+        if biggest_transactions:
+            biggest_tx = biggest_transactions[0]
+            print(f"\n🔥 Biggest Transaction:")
+            print(f"   Transaction: {biggest_tx['tx_hash']}")
+            print(f"   Block: {biggest_tx['block_number']} (position {biggest_tx['transaction_index']})")
+            print(f"   Gas used: {biggest_tx['gas_used']:,} / {biggest_tx['gas_limit']:,} ({biggest_tx['gas_efficiency']:.1f}% efficiency)")
+            print(f"   Block gas share: {biggest_tx['block_gas_percentage']:.1f}% ({biggest_tx['gas_used']:,} / {biggest_tx['block_gas_used']:,})")
+            print(f"   From: {biggest_tx['from_address']}")
+            print(f"   To: {biggest_tx['to_address'] or 'Contract Creation'}")
+            
+            if biggest_tx['value']:
+                try:
+                    value_wei = int(biggest_tx['value']) if biggest_tx['value'] else 0
+                    if value_wei > 0:
+                        print(f"   Value: {value_wei / 1e18:.4f} ETH")
+                    else:
+                        print(f"   Value: 0 ETH")
+                except (ValueError, TypeError):
+                    print(f"   Value: {biggest_tx['value']} (raw)")
+            else:
+                print(f"   Value: 0 ETH")
+            
+            if biggest_tx['gas_price']:
+                try:
+                    gas_price_gwei = int(biggest_tx['gas_price']) / 1e9
+                    print(f"   Gas price: {gas_price_gwei:.2f} Gwei")
+                    
+                    # Calculate transaction fee
+                    tx_fee_eth = (biggest_tx['gas_used'] * int(biggest_tx['gas_price'])) / 1e18
+                    print(f"   Transaction fee: {tx_fee_eth:.6f} ETH")
+                except (ValueError, TypeError):
+                    print(f"   Gas price: {biggest_tx['gas_price']} (raw)")
+        
+        # Analysis insights
+        print(f"\n💡 Insights:")
+        contract_creations = len([tx for tx in biggest_transactions if not tx['to_address']])
+        high_efficiency = len([tx for tx in biggest_transactions if tx['gas_efficiency'] > 95])
+        block_dominators = len([tx for tx in biggest_transactions if tx['block_gas_percentage'] > 50])
+        
+        print(f"   Contract creations: {contract_creations}/{len(biggest_transactions)} ({contract_creations/len(biggest_transactions)*100:.1f}%)")
+        print(f"   High efficiency (>95%): {high_efficiency}/{len(biggest_transactions)} ({high_efficiency/len(biggest_transactions)*100:.1f}%)")
+        print(f"   Block dominators (>50% of block gas): {block_dominators}/{len(biggest_transactions)} ({block_dominators/len(biggest_transactions)*100:.1f}%)")
+        
+        # Save to CSV if requested
+        if output_file:
+            import csv
+            with open(output_file, 'w', newline='') as csvfile:
+                fieldnames = [
+                    'rank', 'tx_hash', 'block_number', 'transaction_index', 'gas_used', 'gas_limit', 
+                    'gas_efficiency', 'from_address', 'to_address', 'value', 'gas_price', 
+                    'block_gas_used', 'block_gas_percentage', 'block_tx_count', 'timestamp'
+                ]
+                writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
+                writer.writeheader()
+                writer.writerows(biggest_transactions)
+            
+            print(f"\n💾 Results saved to: {output_file}")
+        
+        print(f"\n✅ Biggest transactions analysis complete!")
+        return 0
+        
+    except Exception as e:
+        print(f"❌ Error in biggest transactions analysis: {e}")
+        import traceback
+        traceback.print_exc()
+        return 1
+    finally:
+        try:
+            database.close()
+        except:
+            pass 
