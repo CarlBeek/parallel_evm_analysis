@@ -344,13 +344,12 @@ class ParallelizationSimulator:
         dep_graph: DependencyGraph
     ) -> List[TransactionAssignment]:
         """Allocate transactions to threads using dependency-aware approach."""
-        # Get dependency chains
-        chains = dep_graph.get_dependency_chains()
-        independent = dep_graph.get_independent_transactions()
-        
         assignments = []
         thread_gas = [0] * thread_count
         assigned_transactions = set()  # Track which transactions have been assigned
+        
+        # Get dependency chains - these need to stay together on same thread
+        chains = dep_graph.get_dependency_chains()
         
         # Assign dependency chains to threads (balance by total chain gas)
         for chain in chains:
@@ -373,10 +372,11 @@ class ParallelizationSimulator:
                     ))
                     assigned_transactions.add(tx_hash)
         
-        # Assign independent transactions to balance load (only if not already assigned)
-        for tx_hash in independent:
-            if tx_hash not in assigned_transactions:  # Prevent double assignment
-                tx = dep_graph.transactions[tx_hash]
+        # CRITICAL FIX: Assign ALL remaining transactions that weren't part of chains
+        # This ensures no transactions are lost during allocation
+        for tx in transactions:
+            if tx.hash not in assigned_transactions:
+                # Find thread with minimum gas for load balancing
                 thread_id = min(range(thread_count), key=lambda i: thread_gas[i])
                 thread_gas[thread_id] += tx.gas_used
                 
@@ -385,9 +385,18 @@ class ParallelizationSimulator:
                     tx_index=tx.transaction_index,
                     thread_id=thread_id,
                     gas_used=tx.gas_used,
-                    execution_order=0  # Independent transactions can execute immediately
+                    execution_order=0  # Can execute when dependencies are met
                 ))
-                assigned_transactions.add(tx_hash)
+                assigned_transactions.add(tx.hash)
+        
+        # Verify all transactions were assigned (debugging)
+        total_input_gas = sum(tx.gas_used for tx in transactions)
+        total_assigned_gas = sum(assignment.gas_used for assignment in assignments)
+        
+        if abs(total_input_gas - total_assigned_gas) > 1000:  # Allow small rounding errors
+            self.logger.error(f"Transaction allocation bug: Input gas {total_input_gas:,} != "
+                            f"Assigned gas {total_assigned_gas:,}, "
+                            f"Missing: {total_input_gas - total_assigned_gas:,}")
         
         return assignments
     

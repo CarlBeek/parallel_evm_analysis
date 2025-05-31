@@ -53,6 +53,19 @@ def handle_analyze(args):
             return 1
         
         return analyze_parallelization_aggregate(thread_counts, args.output_dir)
+    elif args.analyze_cmd == 'violin':
+        if not PARALLELIZATION_AVAILABLE:
+            print("❌ Parallelization analysis modules not available")
+            return 1
+            
+        # Parse thread counts
+        try:
+            thread_counts = [int(t.strip()) for t in args.thread_counts.split(',')]
+        except (ValueError, AttributeError):
+            print(f"❌ Invalid thread count format: {getattr(args, 'thread_counts', 'None')}")
+            return 1
+        
+        return analyze_violin_plots(thread_counts, args.output_dir)
     else:
         print("❌ No analyze operation specified. Use --help for options.")
         return 1
@@ -1358,6 +1371,79 @@ def analyze_parallelization_aggregate(thread_counts=None, output_dir='./data/gra
         
     except Exception as e:
         print(f"❌ Error in aggregate parallelization analysis: {e}")
+        import traceback
+        traceback.print_exc()
+        return 1
+
+
+def analyze_violin_plots(thread_counts=None, output_dir='./data/graphs'):
+    """
+    Create violin plots showing speedup distributions for dependency-aware vs state-diff approaches.
+    This shows the actual distribution shape across all blocks, not just means and confidence intervals.
+    """
+    print("🎻 Starting Violin Plot Analysis for Speedup Distributions...")
+    
+    if not PARALLELIZATION_AVAILABLE:
+        print("❌ Parallelization analysis modules not available")
+        return 1
+    
+    try:
+        database = BlockchainDatabase()
+        
+        # Check available data
+        stats = database.get_database_stats()
+        total_blocks = stats.get('block_count', 0)
+        
+        if total_blocks == 0:
+            print("❌ No blocks found in database. Run data collection first.")
+            return 1
+        
+        print(f"📊 Found {total_blocks} blocks in database")
+        print(f"   Block range: {stats.get('block_range', {})}")
+        
+        # Default parameters
+        if thread_counts is None:
+            thread_counts = [1, 2, 4, 8, 16, 32, 64]
+        
+        # Get all blocks with reasonable transaction counts
+        cursor = database.connection.cursor()
+        cursor.execute("""
+            SELECT number FROM blocks 
+            WHERE transaction_count >= 20  -- Skip very small blocks for meaningful analysis
+            ORDER BY number ASC
+        """)
+        
+        block_numbers = [row[0] for row in cursor.fetchall()]
+        
+        if len(block_numbers) < 10:
+            print(f"❌ Need at least 10 blocks for statistical analysis, found {len(block_numbers)}")
+            return 1
+        
+        print(f"🔄 Generating violin plots for {len(block_numbers)} blocks...")
+        print(f"   Thread counts: {thread_counts}")
+        print(f"   This will show the full distribution shape of speedup values")
+        
+        # Initialize visualizer
+        visualizer = ParallelizationComparisonVisualizer(output_dir=output_dir)
+        
+        # Generate violin plots
+        html_path = visualizer.create_speedup_distribution_violin_plots(
+            database,
+            block_numbers=block_numbers,
+            thread_counts=thread_counts,
+            min_blocks=len(block_numbers)
+        )
+        
+        print(f"✅ Violin plots saved to: {html_path}")
+        print(f"\n🎯 Analysis complete!")
+        print(f"   📦 Analyzed {len(block_numbers)} blocks")
+        print(f"   🎻 Side-by-side violin plots for dependency-aware vs state-diff approaches")
+        print(f"   📊 Shows full distribution shape, not just means and confidence intervals")
+        
+        return 0
+        
+    except Exception as e:
+        print(f"❌ Error in violin plot analysis: {e}")
         import traceback
         traceback.print_exc()
         return 1 

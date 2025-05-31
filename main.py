@@ -163,6 +163,24 @@ def create_parser():
         help='Directory to save visualization outputs (default: ./data/graphs)'
     )
     
+    # analyze violin (distribution violin plots for parallelization approaches)
+    violin_parser = analyze_subs.add_parser(
+        'violin',
+        help='Create violin plots showing speedup distributions for dependency-aware vs state-diff approaches'
+    )
+    violin_parser.add_argument(
+        '--thread-counts',
+        type=str,
+        default='1,2,4,8,16,32,64',
+        help='Comma-separated thread counts to test (default: 1,2,4,8,16,32,64)'
+    )
+    violin_parser.add_argument(
+        '--output-dir',
+        type=str,
+        default='./data/graphs',
+        help='Directory to save visualization outputs (default: ./data/graphs)'
+    )
+    
     # COLLECT command group
     collect_parser = subparsers.add_parser(
         'collect',

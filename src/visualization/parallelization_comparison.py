@@ -248,20 +248,8 @@ class ParallelizationComparisonVisualizer:
         )
         
         # Standard deviation bands
-        std_devs = []
-        
-        # Calculate per-thread-count statistics
-        for i, thread_count in enumerate(thread_counts):
-            gas_values = []
-            for block_analysis in all_analysis:
-                if len(block_analysis.bottleneck_gas_values) > i:
-                    gas_values.append(block_analysis.bottleneck_gas_values[i])
-            
-            if gas_values:
-                std_dev = float(np.std(gas_values) / 1_000_000)
-                std_devs.append(std_dev)
-            else:
-                std_devs.append(0.0)
+        # Note: For single block analysis, we don't have multiple blocks to calculate std dev
+        # This is just for the single block's data
         
         # Mean gas (dashed line)
         fig.add_trace(
@@ -392,6 +380,10 @@ class ParallelizationComparisonVisualizer:
         speedup_data = {tc: [] for tc in thread_counts}
         efficiency_data = {tc: [] for tc in thread_counts}
         
+        # State-diff approach data (gas-weighted, ignoring dependencies)
+        state_diff_gas_data = {tc: [] for tc in thread_counts}
+        state_diff_speedup_data = {tc: [] for tc in thread_counts}
+        
         successful_blocks = 0
         for block_num in block_numbers:
             try:
@@ -411,6 +403,9 @@ class ParallelizationComparisonVisualizer:
                     transactions, dependencies, block_num, thread_counts
                 )
                 
+                # Use the total sequential gas consistently across both approaches
+                our_sequential_gas = sum(tx.gas_used for tx in transactions)
+                
                 # Collect data for each thread count
                 for i, tc in enumerate(thread_counts):
                     if i < len(analysis.bottleneck_gas_values):
@@ -418,9 +413,23 @@ class ParallelizationComparisonVisualizer:
                         speedup = analysis.speedup_values[i]
                         efficiency = analysis.efficiency_values[i]
                         
+                        # Include all dependency-aware data (bug is now fixed)
                         gas_data[tc].append(gas_millions)
                         speedup_data[tc].append(speedup)
                         efficiency_data[tc].append(efficiency)
+                        
+                        # Calculate state-diff data using our helper method
+                        state_diff_gas = self._simulate_state_diff_parallelization(
+                            transactions, tc
+                        )
+                        state_diff_gas_millions = state_diff_gas / 1_000_000
+                        
+                        # Use consistent sequential baseline for fair comparison
+                        state_diff_speedup = our_sequential_gas / state_diff_gas if state_diff_gas > 0 else 1.0
+                        
+                        # State-diff data should always be valid due to our implementation
+                        state_diff_gas_data[tc].append(state_diff_gas_millions)
+                        state_diff_speedup_data[tc].append(state_diff_speedup)
                 
                 successful_blocks += 1
                 
@@ -440,13 +449,13 @@ class ParallelizationComparisonVisualizer:
         
         # Calculate statistics for each metric
         def calculate_stats(data_dict):
-            means, std_lower, std_upper, maxes, mins = [], [], [], [], []
+            means, percentile_25, percentile_75, maxes, mins = [], [], [], [], []
             for tc in thread_counts:
                 data = data_dict[tc]
                 if not data:
                     means.append(0)
-                    std_lower.append(0)
-                    std_upper.append(0)
+                    percentile_25.append(0)
+                    percentile_75.append(0)
                     maxes.append(0)
                     mins.append(0)
                     continue
@@ -456,21 +465,39 @@ class ParallelizationComparisonVisualizer:
                 max_val = np.max(data_array)
                 min_val = np.min(data_array)
                 
-                # Calculate Mean ± 1σ (shows ~68% of actual blocks)
-                if len(data) > 1:
-                    std_val = np.std(data_array, ddof=1)  # Sample standard deviation
-                    std_lower.append(max(0, mean_val - 1 * std_val))  # Don't go below 0
-                    std_upper.append(mean_val + 1 * std_val)
+                # Calculate 25th and 75th percentiles for confidence intervals
+                p25 = np.percentile(data_array, 25)
+                p75 = np.percentile(data_array, 75)
                 
                 means.append(mean_val)
+                percentile_25.append(p25)
+                percentile_75.append(p75)
                 maxes.append(max_val)
                 mins.append(min_val)
-            return means, std_lower, std_upper, maxes, mins
+                
+            return means, percentile_25, percentile_75, maxes, mins
         
-        # Calculate statistics for all three metrics
-        gas_means, gas_std_lower, gas_std_upper, gas_maxes, gas_mins = calculate_stats(gas_data)
-        speedup_means, speedup_std_lower, speedup_std_upper, speedup_maxes, speedup_mins = calculate_stats(speedup_data)
-        efficiency_means, efficiency_std_lower, efficiency_std_upper, efficiency_maxes, efficiency_mins = calculate_stats(efficiency_data)
+        # Calculate statistics for all metrics
+        gas_means, gas_percentile_25, gas_percentile_75, gas_maxes, gas_mins = calculate_stats(gas_data)
+        speedup_means, speedup_percentile_25, speedup_percentile_75, speedup_maxes, speedup_mins = calculate_stats(speedup_data)
+        efficiency_means, efficiency_percentile_25, efficiency_percentile_75, efficiency_maxes, efficiency_mins = calculate_stats(efficiency_data)
+        
+        # Cap speedup confidence intervals at theoretical maximums (normal distribution can extend beyond physical limits)
+        for i, tc in enumerate(thread_counts):
+            if i < len(speedup_percentile_75):
+                speedup_percentile_75[i] = min(speedup_percentile_75[i], tc)  # Cap at theoretical maximum
+        
+        # Calculate statistics for state-diff approach
+        state_diff_gas_means, state_diff_gas_percentile_25, state_diff_gas_percentile_75, _, _ = calculate_stats(state_diff_gas_data)
+        state_diff_speedup_means, state_diff_speedup_percentile_25, state_diff_speedup_percentile_75, _, _ = calculate_stats(state_diff_speedup_data)
+        
+        # Cap state-diff speedup confidence intervals at theoretical maximums too
+        for i, tc in enumerate(thread_counts):
+            if i < len(state_diff_speedup_percentile_75):
+                state_diff_speedup_percentile_75[i] = min(state_diff_speedup_percentile_75[i], tc)  # Cap at theoretical maximum
+        
+        # Check if we have any state-diff data (we should always have it now)
+        has_state_diff_data = successful_blocks > 0
         
         # Calculate theoretical limits
         # For gas per thread: perfect distribution would be total_gas / thread_count
@@ -501,12 +528,26 @@ class ParallelizationComparisonVisualizer:
         gas_fig.add_trace(
             go.Scatter(
                 x=thread_counts + thread_counts[::-1],
-                y=gas_std_upper + gas_std_lower[::-1],
+                y=gas_percentile_75 + gas_percentile_25[::-1],
                 fill='toself',
                 fillcolor=f'rgba(44, 160, 44, 0.2)',
                 line=dict(color='rgba(255,255,255,0)'),
                 showlegend=True,
-                name='Mean ± 1σ',
+                name='25th-75th Percentile',
+                hoverinfo='skip'
+            )
+        )
+        
+        # State-diff confidence interval
+        gas_fig.add_trace(
+            go.Scatter(
+                x=thread_counts + thread_counts[::-1],
+                y=state_diff_gas_percentile_75 + state_diff_gas_percentile_25[::-1],
+                fill='toself',
+                fillcolor=f'rgba(255, 127, 14, 0.2)',  # Orange with transparency
+                line=dict(color='rgba(255,255,255,0)'),
+                showlegend=True,
+                name='State-Diff 25th-75th Percentile',
                 hoverinfo='skip'
             )
         )
@@ -559,10 +600,27 @@ class ParallelizationComparisonVisualizer:
             )
         )
         
+        # State-diff approach line (gas-weighted, ignoring dependencies)
+        gas_fig.add_trace(
+            go.Scatter(
+                x=thread_counts,
+                y=state_diff_gas_means,
+                mode='lines+markers',
+                name='Parallelization with State-Diffs',
+                line=dict(color='#ff7f0e', width=3, dash='dash'),  # Orange dashed line
+                marker=dict(size=6, symbol='diamond'),
+                hovertemplate='<b>State-Diff Parallelization</b><br>' +
+                            'Threads: %{x}<br>' +
+                            'Gas: %{y:.1f}M<br>' +
+                            'Gas-weighted distribution (ignoring dependencies)<br>' +
+                            '<extra></extra>'
+            )
+        )
+        
         gas_fig.update_layout(
             title=dict(
-                text=f"Gas per Thread<br>" +
-                     f"<sub>{successful_blocks} blocks analyzed - Mean ± 1σ with theoretical limits</sub>",
+                text=f"Gas per Thread: Dependency-Aware vs State-Diff vs Theoretical<br>" +
+                     f"<sub>{successful_blocks} blocks analyzed - 25th-75th Percentile with theoretical limits</sub>",
                 x=0.5,
                 font=dict(size=18)
             ),
@@ -606,12 +664,26 @@ class ParallelizationComparisonVisualizer:
         speedup_fig.add_trace(
             go.Scatter(
                 x=thread_counts + thread_counts[::-1],
-                y=speedup_std_upper + speedup_std_lower[::-1],
+                y=speedup_percentile_75 + speedup_percentile_25[::-1],
                 fill='toself',
                 fillcolor=f'rgba(44, 160, 44, 0.2)',
                 line=dict(color='rgba(255,255,255,0)'),
                 showlegend=True,
-                name='Mean ± 1σ',
+                name='25th-75th Percentile',
+                hoverinfo='skip'
+            )
+        )
+        
+        # State-diff confidence interval
+        speedup_fig.add_trace(
+            go.Scatter(
+                x=thread_counts + thread_counts[::-1],
+                y=state_diff_speedup_percentile_75 + state_diff_speedup_percentile_25[::-1],
+                fill='toself',
+                fillcolor=f'rgba(255, 127, 14, 0.2)',  # Orange with transparency
+                line=dict(color='rgba(255,255,255,0)'),
+                showlegend=True,
+                name='State-Diff 25th-75th Percentile',
                 hoverinfo='skip'
             )
         )
@@ -664,10 +736,27 @@ class ParallelizationComparisonVisualizer:
             )
         )
         
+        # State-diff approach speedup line
+        speedup_fig.add_trace(
+            go.Scatter(
+                x=thread_counts,
+                y=state_diff_speedup_means,
+                mode='lines+markers',
+                name='Speedup with State-Diffs',
+                line=dict(color='#ff7f0e', width=3, dash='dash'),  # Orange dashed line
+                marker=dict(size=6, symbol='diamond'),
+                hovertemplate='<b>State-Diff Speedup</b><br>' +
+                            'Threads: %{x}<br>' +
+                            'Speedup: %{y:.2f}x<br>' +
+                            'Gas-weighted distribution (ignoring dependencies)<br>' +
+                            '<extra></extra>'
+            )
+        )
+        
         speedup_fig.update_layout(
             title=dict(
-                text=f"Parallel Speedup vs Sequential<br>" +
-                     f"<sub>{successful_blocks} blocks analyzed - Mean ± 1σ with theoretical limits</sub>",
+                text=f"Speedup: Dependency-Aware vs State-Diff vs Theoretical<br>" +
+                     f"<sub>{successful_blocks} blocks analyzed - 25th-75th Percentile with theoretical limits</sub>",
                 x=0.5,
                 font=dict(size=18)
             ),
@@ -711,12 +800,12 @@ class ParallelizationComparisonVisualizer:
         efficiency_fig.add_trace(
             go.Scatter(
                 x=thread_counts + thread_counts[::-1],
-                y=efficiency_std_upper + efficiency_std_lower[::-1],
+                y=efficiency_percentile_75 + efficiency_percentile_25[::-1],
                 fill='toself',
                 fillcolor=f'rgba(44, 160, 44, 0.2)',
                 line=dict(color='rgba(255,255,255,0)'),
                 showlegend=True,
-                name='Mean ± 1σ',
+                name='25th-75th Percentile',
                 hoverinfo='skip'
             )
         )
@@ -740,7 +829,7 @@ class ParallelizationComparisonVisualizer:
         efficiency_fig.update_layout(
             title=dict(
                 text=f"Thread Efficiency (Load Balance)<br>" +
-                     f"<sub>{successful_blocks} blocks analyzed - Mean ± 1σ</sub>",
+                     f"<sub>{successful_blocks} blocks analyzed - 25th-75th Percentile</sub>",
                 x=0.5,
                 font=dict(size=18)
             ),
@@ -784,6 +873,214 @@ class ParallelizationComparisonVisualizer:
         
         # Return the primary gas plot path for backwards compatibility
         return str(gas_filepath)
+    
+    def create_speedup_distribution_violin_plots(
+        self,
+        database: BlockchainDatabase,
+        block_numbers: Optional[List[int]] = None,
+        thread_counts: Optional[List[int]] = None,
+        min_blocks: int = 10
+    ) -> str:
+        """
+        Create violin plots showing speedup distributions for dependency-aware vs state-diff approaches.
+        
+        Args:
+            database: Database instance for loading block data
+            block_numbers: List of block numbers to analyze (default: recent blocks with good tx count)
+            thread_counts: Thread counts to test (default: [1,2,4,8,16,32,64])
+            min_blocks: Minimum number of blocks to analyze for statistics
+            
+        Returns:
+            Path to the generated HTML file
+        """
+        if thread_counts is None:
+            thread_counts = [1, 2, 4, 8, 16, 32, 64]
+        
+        if block_numbers is None:
+            # Get blocks with good transaction counts for statistical analysis
+            db_stats = database.get_database_stats()
+            max_block = db_stats['block_range']['max']
+            block_numbers = []
+            
+            # Look through more blocks to get enough data
+            for i in range(50):  # Check last 50 blocks
+                block_num = max_block - i
+                block_data = database.get_block(block_num)
+                if block_data and block_data['transaction_count'] > 50:  # Lower threshold for more data
+                    block_numbers.append(block_num)
+                if len(block_numbers) >= min_blocks * 2:  # Get extra blocks
+                    break
+        
+        if len(block_numbers) < min_blocks:
+            raise ValueError(f"Need at least {min_blocks} blocks for statistical analysis, found {len(block_numbers)}")
+        
+        self.logger.info(f"Creating violin plots for {len(block_numbers)} blocks")
+        
+        # Collect data from all blocks
+        simulator = ParallelizationSimulator()
+        dependency_speedup_data = {tc: [] for tc in thread_counts}
+        state_diff_speedup_data = {tc: [] for tc in thread_counts}
+        
+        successful_blocks = 0
+        for block_num in block_numbers:
+            try:
+                # Load block data
+                transactions_raw = database.get_transactions_by_block(block_num)
+                dependencies_raw = database.get_dependencies_for_block(block_num)
+                
+                if not transactions_raw or len(transactions_raw) < 20:  # Skip very small blocks
+                    continue
+                
+                # Convert to objects
+                transactions = self._convert_transactions(transactions_raw)
+                dependencies = self._convert_dependencies(dependencies_raw)
+                
+                # Run analysis
+                analysis = simulator.analyze_thread_count_performance(
+                    transactions, dependencies, block_num, thread_counts
+                )
+                
+                # Use the total sequential gas consistently across both approaches
+                our_sequential_gas = sum(tx.gas_used for tx in transactions)
+                
+                # Collect data for each thread count
+                for i, tc in enumerate(thread_counts):
+                    if i < len(analysis.bottleneck_gas_values):
+                        speedup = analysis.speedup_values[i]
+                        
+                        # Cap speedup at theoretical maximum
+                        capped_speedup = min(speedup, tc)
+                        dependency_speedup_data[tc].append(capped_speedup)
+                        
+                        # Calculate state-diff data
+                        state_diff_gas = self._simulate_state_diff_parallelization(
+                            transactions, tc
+                        )
+                        state_diff_speedup = our_sequential_gas / state_diff_gas if state_diff_gas > 0 else 1.0
+                        capped_state_diff_speedup = min(state_diff_speedup, tc)
+                        state_diff_speedup_data[tc].append(capped_state_diff_speedup)
+                
+                successful_blocks += 1
+                
+                if successful_blocks >= min_blocks:
+                    break
+                    
+            except Exception as e:
+                self.logger.warning(f"Failed to analyze block {block_num}: {e}")
+                continue
+        
+        if successful_blocks < min_blocks:
+            raise ValueError(f"Only analyzed {successful_blocks} blocks successfully, need {min_blocks}")
+        
+        self.logger.info(f"Successfully analyzed {successful_blocks} blocks for violin plots")
+        
+        # Create subplots: one row per thread count
+        n_threads = len(thread_counts)
+        fig = make_subplots(
+            rows=n_threads, cols=1,
+            subplot_titles=[f"{tc} Threads" for tc in thread_counts],
+            vertical_spacing=0.08,
+            specs=[[{"secondary_y": False}] for _ in range(n_threads)]
+        )
+        
+        # Add violin plots for each thread count
+        for i, tc in enumerate(thread_counts):
+            row = i + 1
+            
+            # Dependency-aware violin (green)
+            if dependency_speedup_data[tc]:
+                fig.add_trace(
+                    go.Violin(
+                        y=dependency_speedup_data[tc],
+                        x=[f"Dependency-Aware"] * len(dependency_speedup_data[tc]),
+                        name=f"Dependency-Aware",
+                        line_color="#2ca02c",
+                        fillcolor="rgba(44, 160, 44, 0.7)",
+                        points="outliers",
+                        box_visible=True,
+                        meanline_visible=True,
+                        showlegend=(i == 0),  # Only show legend for first subplot
+                        hovertemplate=f'<b>Dependency-Aware ({tc} threads)</b><br>' +
+                                    'Speedup: %{y:.3f}x<br>' +
+                                    '<extra></extra>',
+                        width=0.6
+                    ),
+                    row=row, col=1
+                )
+            
+            # State-diff violin (orange)  
+            if state_diff_speedup_data[tc]:
+                fig.add_trace(
+                    go.Violin(
+                        y=state_diff_speedup_data[tc],
+                        x=[f"State-Diff"] * len(state_diff_speedup_data[tc]),
+                        name=f"State-Diff",
+                        line_color="#ff7f0e",
+                        fillcolor="rgba(255, 127, 14, 0.7)",
+                        points="outliers",
+                        box_visible=True,
+                        meanline_visible=True,
+                        showlegend=(i == 0),  # Only show legend for first subplot
+                        hovertemplate=f'<b>State-Diff ({tc} threads)</b><br>' +
+                                    'Speedup: %{y:.3f}x<br>' +
+                                    '<extra></extra>',
+                        width=0.6
+                    ),
+                    row=row, col=1
+                )
+            
+            # Add theoretical maximum line
+            fig.add_hline(
+                y=tc, 
+                line_dash="dot", 
+                line_color="blue", 
+                line_width=2,
+                annotation_text=f"Theoretical Max ({tc}x)",
+                annotation_position="top right",
+                row=row, col=1
+            )
+            
+            # Update y-axis for this subplot
+            fig.update_yaxes(
+                title_text="Speedup (x)",
+                range=[0.8, min(tc * 1.1, tc + 0.5)],  # Give some headroom but not too much
+                row=row, col=1
+            )
+            
+            # Update x-axis for this subplot
+            fig.update_xaxes(
+                title_text="Parallelization Approach",
+                row=row, col=1
+            )
+        
+        # Update overall layout
+        fig.update_layout(
+            title=dict(
+                text=f"Speedup Distribution Comparison: Dependency-Aware vs State-Diff<br>" +
+                     f"<sub>{successful_blocks} blocks analyzed - Violin plots show full distribution</sub>",
+                x=0.5,
+                font=dict(size=18)
+            ),
+            height=200 * n_threads + 100,  # Scale height with number of thread counts
+            width=1000,
+            plot_bgcolor='white',
+            paper_bgcolor='white',
+            legend=dict(
+                orientation="h",
+                yanchor="bottom",
+                y=1.02,
+                xanchor="center",
+                x=0.5
+            )
+        )
+        
+        # Save violin plot
+        violin_filename = f"speedup_distribution_violin_{successful_blocks}_blocks.html"
+        violin_filepath = self.output_dir / violin_filename
+        fig.write_html(str(violin_filepath), include_plotlyjs=True, config={'displayModeBar': True, 'displaylogo': False})
+        
+        self.logger.info(f"Speedup distribution violin plots saved to {violin_filepath}")
+        return str(violin_filepath)
     
     def _convert_transactions(self, transactions_raw: List[Dict]) -> List[TransactionData]:
         """Convert database transaction data to TransactionData objects."""
@@ -843,3 +1140,36 @@ class ParallelizationComparisonVisualizer:
             bordercolor="rgba(0,0,0,0.3)",
             borderwidth=1
         ) 
+    
+    def _simulate_state_diff_parallelization(
+        self,
+        transactions: List[TransactionData],
+        thread_count: int
+    ) -> int:
+        """
+        Simulate gas-weighted transaction distribution ignoring dependencies.
+        This represents parallelization with state-diffs to resolve conflicts.
+        
+        Args:
+            transactions: List of transactions
+            thread_count: Number of threads
+            
+        Returns:
+            Bottleneck gas (maximum gas on any thread)
+        """
+        if not transactions:
+            return 0
+        
+        # Sort transactions by gas usage (largest first) for better distribution
+        sorted_transactions = sorted(transactions, key=lambda tx: tx.gas_used, reverse=True)
+        
+        # Greedy allocation: assign each transaction to the thread with minimum current gas
+        thread_gas = [0] * thread_count
+        
+        for tx in sorted_transactions:
+            # Find thread with minimum gas
+            thread_id = min(range(thread_count), key=lambda i: thread_gas[i])
+            thread_gas[thread_id] += tx.gas_used
+        
+        # Return bottleneck gas (maximum gas on any thread)
+        return max(thread_gas) if thread_gas else 0 
