@@ -166,7 +166,7 @@ def create_parser():
     # analyze violin (distribution violin plots for parallelization approaches)
     violin_parser = analyze_subs.add_parser(
         'violin',
-        help='Create violin plots showing speedup distributions for dependency-aware vs state-diff approaches'
+        help='Create violin plots showing speedup distributions for segregated state vs state-diff approaches'
     )
     violin_parser.add_argument(
         '--thread-counts',
@@ -179,6 +179,47 @@ def create_parser():
         type=str,
         default='./data/graphs',
         help='Directory to save visualization outputs (default: ./data/graphs)'
+    )
+    
+    # analyze state-diff (state-diff only analysis)
+    state_diff_parser = analyze_subs.add_parser(
+        'state-diff',
+        help='Create analysis plots showing only the state-diff approach (gas-weighted distribution)'
+    )
+    state_diff_parser.add_argument(
+        '--thread-counts',
+        type=str,
+        default='1,2,4,8,16,32,64',
+        help='Comma-separated thread counts to test (default: 1,2,4,8,16,32,64)'
+    )
+    state_diff_parser.add_argument(
+        '--output-dir',
+        type=str,
+        default='./data/graphs',
+        help='Directory to save visualization outputs (default: ./data/graphs)'
+    )
+    
+    # analyze gas-dominance (find blocks with dominant transactions)
+    gas_dominance_parser = analyze_subs.add_parser(
+        'gas-dominance',
+        help='Find blocks where a single transaction uses >95% of total gas'
+    )
+    gas_dominance_parser.add_argument(
+        '--threshold',
+        type=float,
+        default=95.0,
+        help='Gas percentage threshold (default: 95.0)'
+    )
+    gas_dominance_parser.add_argument(
+        '--limit',
+        type=int,
+        default=50,
+        help='Maximum number of blocks to display (default: 50)'
+    )
+    gas_dominance_parser.add_argument(
+        '--output-file',
+        type=str,
+        help='Optional CSV file to save results (default: print to console)'
     )
     
     # COLLECT command group

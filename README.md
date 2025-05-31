@@ -359,7 +359,7 @@ python main.py analyze parallelization
 python main.py analyze parallelization --block 22593078 --threads 1,2,4,8,16,32
 
 # Compare specific strategies
-python main.py analyze parallelization --strategies dependency-aware
+python main.py analyze parallelization --strategies segregated-state
 
 # Run multi-block validation analysis
 python main.py analyze parallelization --multi-block
@@ -373,7 +373,7 @@ python main.py analyze parallelization --aggregate
 The tool implements two parallelization strategies that respect the fundamental constraint that **dependent transactions must execute on the same thread**:
 
 1. **Sequential** - Traditional single-threaded execution (baseline)
-2. **Dependency-Aware** - Groups dependency chains and distributes whole chains across threads for optimal load balancing
+2. **Segregated State** - Groups dependency chains and distributes whole chains across threads for optimal load balancing
 
 ### Command Options
 
@@ -384,7 +384,7 @@ python main.py analyze parallelization [OPTIONS]
 **Options:**
 - `--block BLOCK` - Specific block number to analyze (default: auto-select recent block with good transaction count)
 - `--threads THREADS` - Comma-separated thread counts to test (default: 1,2,4,8,16,32)
-- `--strategies STRATEGIES` - Strategies to compare: all, sequential, dependency-aware (default: all)
+- `--strategies STRATEGIES` - Strategies to compare: all, sequential, segregated-state (default: all)
 - `--multi-block` - Run analysis across multiple blocks for validation
 - `--output-dir DIR` - Directory to save visualizations (default: ./data/graphs)
 - `--aggregate` - Run aggregate statistical analysis across multiple blocks
@@ -420,14 +420,14 @@ For block 22593078 (240 transactions, 55 dependencies):
 
 ```
 🏆 OPTIMAL CONFIGURATION:
-   Strategy: Dependency Aware
+   Strategy: Segregated State
    Threads: 8
    Speedup: 14.37x
    Max Gas: 2.9M
 ```
 
 **Key Findings:**
-- Dependency-Aware strategy achieves 14.37x speedup with 8 threads while respecting all dependency constraints
+- Segregated State strategy achieves 14.37x speedup with 8 threads while respecting all dependency constraints
 - Sequential baseline provides 1.0x reference performance
 - Independent transactions can be distributed across threads for load balancing
 - Dependency chains must stay together on the same thread (fundamental constraint)

@@ -343,7 +343,7 @@ class ParallelizationSimulator:
         thread_count: int,
         dep_graph: DependencyGraph
     ) -> List[TransactionAssignment]:
-        """Allocate transactions to threads using dependency-aware approach."""
+        """Allocate transactions to threads using segregated state approach."""
         assignments = []
         thread_gas = [0] * thread_count
         assigned_transactions = set()  # Track which transactions have been assigned

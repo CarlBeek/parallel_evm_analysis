@@ -92,7 +92,7 @@ class ParallelizationComparisonVisualizer:
                 line=dict(color=color, width=3),
                 marker=dict(size=8),
                 hovertemplate='<b>Parallelization</b><br>' +
-                            'Threads: %{x}<br>' +
+                            'Virtual Cores: %{x}<br>' +
                             'Max Gas: %{y:.1f}M<br>' +
                             '<extra></extra>'
             ),
@@ -110,7 +110,7 @@ class ParallelizationComparisonVisualizer:
                 marker=dict(size=8),
                 showlegend=False,
                 hovertemplate='<b>Parallelization</b><br>' +
-                            'Threads: %{x}<br>' +
+                            'Virtual Cores: %{x}<br>' +
                             'Mean Gas: %{y:.1f}M<br>' +
                             '<extra></extra>'
             ),
@@ -128,7 +128,7 @@ class ParallelizationComparisonVisualizer:
                 marker=dict(size=8),
                 showlegend=False,
                 hovertemplate='<b>Parallelization</b><br>' +
-                            'Threads: %{x}<br>' +
+                            'Virtual Cores: %{x}<br>' +
                             'Speedup: %{y:.2f}x<br>' +
                             '<extra></extra>'
             ),
@@ -146,7 +146,7 @@ class ParallelizationComparisonVisualizer:
                 marker=dict(size=8),
                 showlegend=False,
                 hovertemplate='<b>Parallelization</b><br>' +
-                            'Threads: %{x}<br>' +
+                            'Virtual Cores: %{x}<br>' +
                             'Efficiency: %{y:.2f}<br>' +
                             '<extra></extra>'
             ),
@@ -240,7 +240,7 @@ class ParallelizationComparisonVisualizer:
                 line=dict(color=color, width=4),
                 marker=dict(size=10),
                 hovertemplate='<b>Maximum Gas</b><br>' +
-                            'Threads: %{x}<br>' +
+                            'Virtual Cores: %{x}<br>' +
                             'Max Gas: %{y:.1f}M<br>' +
                             '<extra></extra>'
             ),
@@ -261,7 +261,7 @@ class ParallelizationComparisonVisualizer:
                 line=dict(color='red', width=2, dash='dash'),
                 marker=dict(size=6),
                 hovertemplate='<b>Mean Gas</b><br>' +
-                            'Threads: %{x}<br>' +
+                            'Virtual Cores: %{x}<br>' +
                             'Gas: %{y:.1f}M<br>' +
                             '<extra></extra>'
             )
@@ -413,7 +413,7 @@ class ParallelizationComparisonVisualizer:
                         speedup = analysis.speedup_values[i]
                         efficiency = analysis.efficiency_values[i]
                         
-                        # Include all dependency-aware data (bug is now fixed)
+                        # Include all segregated state data (bug is now fixed)
                         gas_data[tc].append(gas_millions)
                         speedup_data[tc].append(speedup)
                         efficiency_data[tc].append(efficiency)
@@ -489,7 +489,7 @@ class ParallelizationComparisonVisualizer:
         
         # Calculate statistics for state-diff approach
         state_diff_gas_means, state_diff_gas_percentile_25, state_diff_gas_percentile_75, _, _ = calculate_stats(state_diff_gas_data)
-        state_diff_speedup_means, state_diff_speedup_percentile_25, state_diff_speedup_percentile_75, _, _ = calculate_stats(state_diff_speedup_data)
+        state_diff_speedup_means, state_diff_speedup_percentile_25, state_diff_speedup_percentile_75, _, state_diff_speedup_mins = calculate_stats(state_diff_speedup_data)
         
         # Cap state-diff speedup confidence intervals at theoretical maximums too
         for i, tc in enumerate(thread_counts):
@@ -562,7 +562,7 @@ class ParallelizationComparisonVisualizer:
                 line=dict(color=color, width=4),
                 marker=dict(size=8),
                 hovertemplate='<b>Mean Gas</b><br>' +
-                            'Threads: %{x}<br>' +
+                            'Virtual Cores: %{x}<br>' +
                             'Gas: %{y:.1f}M<br>' +
                             '<extra></extra>'
             )
@@ -578,7 +578,7 @@ class ParallelizationComparisonVisualizer:
                 line=dict(color=color, width=2, dash='dash'),
                 marker=dict(size=6, symbol='triangle-up'),
                 hovertemplate='<b>Maximum Gas</b><br>' +
-                            'Threads: %{x}<br>' +
+                            'Virtual Cores: %{x}<br>' +
                             'Gas: %{y:.1f}M<br>' +
                             '<extra></extra>'
             )
@@ -593,7 +593,7 @@ class ParallelizationComparisonVisualizer:
                 name='Theoretical Perfect Distribution',
                 line=dict(color='#1f77b4', width=3, dash='dot'),  # Blue dotted line
                 hovertemplate='<b>Theoretical Perfect</b><br>' +
-                            'Threads: %{x}<br>' +
+                            'Virtual Cores: %{x}<br>' +
                             'Gas: %{y:.1f}M<br>' +
                             f'Based on {mean_total_gas:.1f}M mean total gas<br>' +
                             '<extra></extra>'
@@ -610,7 +610,7 @@ class ParallelizationComparisonVisualizer:
                 line=dict(color='#ff7f0e', width=3, dash='dash'),  # Orange dashed line
                 marker=dict(size=6, symbol='diamond'),
                 hovertemplate='<b>State-Diff Parallelization</b><br>' +
-                            'Threads: %{x}<br>' +
+                            'Virtual Cores: %{x}<br>' +
                             'Gas: %{y:.1f}M<br>' +
                             'Gas-weighted distribution (ignoring dependencies)<br>' +
                             '<extra></extra>'
@@ -619,13 +619,12 @@ class ParallelizationComparisonVisualizer:
         
         gas_fig.update_layout(
             title=dict(
-                text=f"Gas per Thread: Dependency-Aware vs State-Diff vs Theoretical<br>" +
-                     f"<sub>{successful_blocks} blocks analyzed - 25th-75th Percentile with theoretical limits</sub>",
+                text=f"Gas per Thread - simulated parallelization over {successful_blocks} blocks",
                 x=0.5,
                 font=dict(size=18)
             ),
             xaxis=dict(
-                title="Number of Threads",
+                title="Number of Virtual Cores (k)",
                 title_font=dict(size=14),
                 tickfont=dict(size=12),
                 showgrid=True,
@@ -645,10 +644,11 @@ class ParallelizationComparisonVisualizer:
             legend=dict(
                 orientation="h",
                 yanchor="bottom",
-                y=1.15,
+                y=-0.20,  # Move legend further down
                 xanchor="center",
                 x=0.5
-            )
+            ),
+            margin=dict(b=120)  # Increase bottom margin for more space
         )
         
         # Save gas plot
@@ -688,17 +688,17 @@ class ParallelizationComparisonVisualizer:
             )
         )
         
-        # Average speedup
+        # State-diff mean speedup
         speedup_fig.add_trace(
             go.Scatter(
                 x=thread_counts,
-                y=speedup_means,
+                y=state_diff_speedup_means,
                 mode='lines+markers',
                 name='Mean Speedup',
-                line=dict(color=color, width=4),
+                line=dict(color='#ff7f0e', width=4),
                 marker=dict(size=8),
-                hovertemplate='<b>Mean Speedup</b><br>' +
-                            'Threads: %{x}<br>' +
+                hovertemplate='<b>State-Diff Speedup</b><br>' +
+                            'Virtual Cores: %{x}<br>' +
                             'Speedup: %{y:.2f}x<br>' +
                             '<extra></extra>'
             )
@@ -708,13 +708,13 @@ class ParallelizationComparisonVisualizer:
         speedup_fig.add_trace(
             go.Scatter(
                 x=thread_counts,
-                y=speedup_mins,
+                y=state_diff_speedup_mins,
                 mode='lines+markers',
                 name='Minimum Speedup',
                 line=dict(color='#d62728', width=3, dash='dot'),  # Red dashed line
                 marker=dict(size=6, symbol='triangle-down'),
                 hovertemplate='<b>Minimum Speedup</b><br>' +
-                            'Threads: %{x}<br>' +
+                            'Virtual Cores: %{x}<br>' +
                             'Speedup: %{y:.2f}x<br>' +
                             '<extra></extra>'
             )
@@ -729,7 +729,7 @@ class ParallelizationComparisonVisualizer:
                 name='Theoretical Linear Speedup',
                 line=dict(color='#1f77b4', width=3, dash='dot'),  # Blue dotted line
                 hovertemplate='<b>Theoretical Perfect</b><br>' +
-                            'Threads: %{x}<br>' +
+                            'Virtual Cores: %{x}<br>' +
                             'Speedup: %{y:.2f}x<br>' +
                             'Perfect linear scaling<br>' +
                             '<extra></extra>'
@@ -746,22 +746,20 @@ class ParallelizationComparisonVisualizer:
                 line=dict(color='#ff7f0e', width=3, dash='dash'),  # Orange dashed line
                 marker=dict(size=6, symbol='diamond'),
                 hovertemplate='<b>State-Diff Speedup</b><br>' +
-                            'Threads: %{x}<br>' +
+                            'Virtual Cores: %{x}<br>' +
                             'Speedup: %{y:.2f}x<br>' +
-                            'Gas-weighted distribution (ignoring dependencies)<br>' +
                             '<extra></extra>'
             )
         )
         
         speedup_fig.update_layout(
             title=dict(
-                text=f"Speedup: Dependency-Aware vs State-Diff vs Theoretical<br>" +
-                     f"<sub>{successful_blocks} blocks analyzed - 25th-75th Percentile with theoretical limits</sub>",
+                text=f"Speedup - simulated parallelization over {successful_blocks} blocks",
                 x=0.5,
                 font=dict(size=18)
             ),
             xaxis=dict(
-                title="Number of Threads",
+                title="Number of Virtual Cores (k)",
                 title_font=dict(size=14),
                 tickfont=dict(size=12),
                 showgrid=True,
@@ -781,10 +779,11 @@ class ParallelizationComparisonVisualizer:
             legend=dict(
                 orientation="h",
                 yanchor="bottom",
-                y=1.15,
+                y=-0.20,  # Move legend further down
                 xanchor="center",
                 x=0.5
-            )
+            ),
+            margin=dict(b=120)  # Increase bottom margin for more space
         )
         
         # Save speedup plot
@@ -820,7 +819,7 @@ class ParallelizationComparisonVisualizer:
                 line=dict(color=color, width=4),
                 marker=dict(size=8),
                 hovertemplate='<b>Mean Efficiency</b><br>' +
-                            'Threads: %{x}<br>' +
+                            'Virtual Cores: %{x}<br>' +
                             'Efficiency: %{y:.2f}<br>' +
                             '<extra></extra>'
             )
@@ -828,13 +827,12 @@ class ParallelizationComparisonVisualizer:
         
         efficiency_fig.update_layout(
             title=dict(
-                text=f"Thread Efficiency (Load Balance)<br>" +
-                     f"<sub>{successful_blocks} blocks analyzed - 25th-75th Percentile</sub>",
+                text=f"Thread Efficiency - simulated parallelization over {successful_blocks} blocks",
                 x=0.5,
                 font=dict(size=18)
             ),
             xaxis=dict(
-                title="Number of Threads",
+                title="Number of Virtual Cores (k)",
                 title_font=dict(size=14),
                 tickfont=dict(size=12),
                 showgrid=True,
@@ -854,10 +852,11 @@ class ParallelizationComparisonVisualizer:
             legend=dict(
                 orientation="h",
                 yanchor="bottom",
-                y=1.15,
+                y=-0.20,  # Move legend further down
                 xanchor="center",
                 x=0.5
-            )
+            ),
+            margin=dict(b=120)  # Increase bottom margin for more space
         )
         
         # Save efficiency plot
@@ -882,7 +881,7 @@ class ParallelizationComparisonVisualizer:
         min_blocks: int = 10
     ) -> str:
         """
-        Create violin plots showing speedup distributions for dependency-aware vs state-diff approaches.
+        Create violin plots showing speedup distributions for segregated state vs state-diff approaches.
         
         Args:
             database: Database instance for loading block data
@@ -918,7 +917,7 @@ class ParallelizationComparisonVisualizer:
         
         # Collect data from all blocks
         simulator = ParallelizationSimulator()
-        dependency_speedup_data = {tc: [] for tc in thread_counts}
+        segregated_state_speedup_data = {tc: [] for tc in thread_counts}
         state_diff_speedup_data = {tc: [] for tc in thread_counts}
         
         successful_blocks = 0
@@ -950,7 +949,7 @@ class ParallelizationComparisonVisualizer:
                         
                         # Cap speedup at theoretical maximum
                         capped_speedup = min(speedup, tc)
-                        dependency_speedup_data[tc].append(capped_speedup)
+                        segregated_state_speedup_data[tc].append(capped_speedup)
                         
                         # Calculate state-diff data
                         state_diff_gas = self._simulate_state_diff_parallelization(
@@ -978,7 +977,7 @@ class ParallelizationComparisonVisualizer:
         n_threads = len(thread_counts)
         fig = make_subplots(
             rows=n_threads, cols=1,
-            subplot_titles=[f"{tc} Threads" for tc in thread_counts],
+            subplot_titles=[f"{tc} Virtual Cores" for tc in thread_counts],
             vertical_spacing=0.08,
             specs=[[{"secondary_y": False}] for _ in range(n_threads)]
         )
@@ -987,20 +986,20 @@ class ParallelizationComparisonVisualizer:
         for i, tc in enumerate(thread_counts):
             row = i + 1
             
-            # Dependency-aware violin (green)
-            if dependency_speedup_data[tc]:
+            # Segregated state violin (green)
+            if segregated_state_speedup_data[tc]:
                 fig.add_trace(
                     go.Violin(
-                        y=dependency_speedup_data[tc],
-                        x=[f"Dependency-Aware"] * len(dependency_speedup_data[tc]),
-                        name=f"Dependency-Aware",
+                        y=segregated_state_speedup_data[tc],
+                        x=[f"Segregated State"] * len(segregated_state_speedup_data[tc]),
+                        name=f"Segregated State",
                         line_color="#2ca02c",
                         fillcolor="rgba(44, 160, 44, 0.7)",
                         points="outliers",
                         box_visible=True,
                         meanline_visible=True,
                         showlegend=(i == 0),  # Only show legend for first subplot
-                        hovertemplate=f'<b>Dependency-Aware ({tc} threads)</b><br>' +
+                        hovertemplate=f'<b>Segregated State ({tc} cores)</b><br>' +
                                     'Speedup: %{y:.3f}x<br>' +
                                     '<extra></extra>',
                         width=0.6
@@ -1021,7 +1020,7 @@ class ParallelizationComparisonVisualizer:
                         box_visible=True,
                         meanline_visible=True,
                         showlegend=(i == 0),  # Only show legend for first subplot
-                        hovertemplate=f'<b>State-Diff ({tc} threads)</b><br>' +
+                        hovertemplate=f'<b>State-Diff ({tc} cores)</b><br>' +
                                     'Speedup: %{y:.3f}x<br>' +
                                     '<extra></extra>',
                         width=0.6
@@ -1056,22 +1055,22 @@ class ParallelizationComparisonVisualizer:
         # Update overall layout
         fig.update_layout(
             title=dict(
-                text=f"Speedup Distribution Comparison: Dependency-Aware vs State-Diff<br>" +
-                     f"<sub>{successful_blocks} blocks analyzed - Violin plots show full distribution</sub>",
+                text=f"Speedup Distribution - simulated parallelization over {successful_blocks} blocks",
                 x=0.5,
                 font=dict(size=18)
             ),
-            height=200 * n_threads + 100,  # Scale height with number of thread counts
+            height=200 * n_threads + 170,  # Add even more height for better spacing
             width=1000,
             plot_bgcolor='white',
             paper_bgcolor='white',
             legend=dict(
                 orientation="h",
                 yanchor="bottom",
-                y=1.02,
+                y=-0.08,  # Position below plots with more space
                 xanchor="center",
                 x=0.5
-            )
+            ),
+            margin=dict(b=100)  # Add bottom margin for legend
         )
         
         # Save violin plot
@@ -1173,3 +1172,353 @@ class ParallelizationComparisonVisualizer:
         
         # Return bottleneck gas (maximum gas on any thread)
         return max(thread_gas) if thread_gas else 0 
+
+    def create_state_diff_only_analysis(
+        self,
+        database: BlockchainDatabase,
+        block_numbers: Optional[List[int]] = None,
+        thread_counts: Optional[List[int]] = None,
+        min_blocks: int = 10
+    ) -> str:
+        """
+        Create analysis plots showing only the state-diff approach (gas-weighted distribution).
+        
+        Args:
+            database: Database instance for loading block data
+            block_numbers: List of block numbers to analyze (default: recent blocks with good tx count)
+            thread_counts: Thread counts to test (default: [1,2,4,8,16,32,64])
+            min_blocks: Minimum number of blocks to analyze for statistics
+            
+        Returns:
+            Path to the generated HTML file
+        """
+        if thread_counts is None:
+            thread_counts = [1, 2, 4, 8, 16, 32, 64]
+        
+        if block_numbers is None:
+            # Get blocks with good transaction counts for statistical analysis
+            db_stats = database.get_database_stats()
+            max_block = db_stats['block_range']['max']
+            block_numbers = []
+            
+            # Look through more blocks to get enough data
+            for i in range(50):  # Check last 50 blocks
+                block_num = max_block - i
+                block_data = database.get_block(block_num)
+                if block_data and block_data['transaction_count'] > 50:  # Lower threshold for more data
+                    block_numbers.append(block_num)
+                if len(block_numbers) >= min_blocks * 2:  # Get extra blocks
+                    break
+        
+        if len(block_numbers) < min_blocks:
+            raise ValueError(f"Need at least {min_blocks} blocks for statistical analysis, found {len(block_numbers)}")
+        
+        self.logger.info(f"Creating state-diff only analysis for {len(block_numbers)} blocks")
+        
+        # Collect state-diff data only
+        state_diff_gas_data = {tc: [] for tc in thread_counts}
+        state_diff_speedup_data = {tc: [] for tc in thread_counts}
+        
+        successful_blocks = 0
+        for block_num in block_numbers:
+            try:
+                # Load block data
+                transactions_raw = database.get_transactions_by_block(block_num)
+                dependencies_raw = database.get_dependencies_for_block(block_num)
+                
+                if not transactions_raw or len(transactions_raw) < 20:  # Skip very small blocks
+                    continue
+                
+                # Convert to objects
+                transactions = self._convert_transactions(transactions_raw)
+                dependencies = self._convert_dependencies(dependencies_raw)
+                
+                # Use the total sequential gas consistently
+                our_sequential_gas = sum(tx.gas_used for tx in transactions)
+                
+                # Collect state-diff data for each thread count
+                for tc in thread_counts:
+                    # Calculate state-diff data using our helper method
+                    state_diff_gas = self._simulate_state_diff_parallelization(
+                        transactions, tc
+                    )
+                    state_diff_gas_millions = state_diff_gas / 1_000_000
+                    
+                    # Use consistent sequential baseline for fair comparison
+                    state_diff_speedup = our_sequential_gas / state_diff_gas if state_diff_gas > 0 else 1.0
+                    
+                    # Cap at theoretical maximum
+                    capped_state_diff_speedup = min(state_diff_speedup, tc)
+                    
+                    # Store data
+                    state_diff_gas_data[tc].append(state_diff_gas_millions)
+                    state_diff_speedup_data[tc].append(capped_state_diff_speedup)
+                
+                successful_blocks += 1
+                
+                if successful_blocks >= min_blocks:
+                    break
+                    
+            except Exception as e:
+                self.logger.warning(f"Failed to analyze block {block_num}: {e}")
+                continue
+        
+        if successful_blocks < min_blocks:
+            raise ValueError(f"Only analyzed {successful_blocks} blocks successfully, need {min_blocks}")
+        
+        self.logger.info(f"Successfully analyzed {successful_blocks} blocks for state-diff analysis")
+        
+        # Calculate statistics
+        def calculate_stats(data_dict):
+            means, percentile_25, percentile_75, maxes, mins = [], [], [], [], []
+            for tc in thread_counts:
+                data = data_dict[tc]
+                if not data:
+                    means.append(0)
+                    percentile_25.append(0)
+                    percentile_75.append(0)
+                    maxes.append(0)
+                    mins.append(0)
+                    continue
+                    
+                data_array = np.array(data)
+                mean_val = np.mean(data_array)
+                max_val = np.max(data_array)
+                min_val = np.min(data_array)
+                
+                # Calculate 25th and 75th percentiles
+                p25 = np.percentile(data_array, 25)
+                p75 = np.percentile(data_array, 75)
+                
+                means.append(mean_val)
+                percentile_25.append(p25)
+                percentile_75.append(p75)
+                maxes.append(max_val)
+                mins.append(min_val)
+                
+            return means, percentile_25, percentile_75, maxes, mins
+        
+        # Calculate statistics for state-diff approach
+        state_diff_gas_means, state_diff_gas_percentile_25, state_diff_gas_percentile_75, _, _ = calculate_stats(state_diff_gas_data)
+        state_diff_speedup_means, state_diff_speedup_percentile_25, state_diff_speedup_percentile_75, _, state_diff_speedup_mins = calculate_stats(state_diff_speedup_data)
+        
+        # Cap speedup confidence intervals at theoretical maximums
+        for i, tc in enumerate(thread_counts):
+            if i < len(state_diff_speedup_percentile_75):
+                state_diff_speedup_percentile_75[i] = min(state_diff_speedup_percentile_75[i], tc)
+        
+        # Calculate theoretical limits
+        total_gas_values = []
+        for block_num in block_numbers:
+            try:
+                transactions_raw = database.get_transactions_by_block(block_num)
+                if transactions_raw:
+                    block_total_gas = sum(tx['gas_used'] or 0 for tx in transactions_raw)
+                    total_gas_values.append(block_total_gas)
+            except:
+                continue
+        
+        if total_gas_values:
+            mean_total_gas = np.mean(total_gas_values) / 1_000_000
+            theoretical_gas_per_thread = [mean_total_gas / tc for tc in thread_counts]
+        else:
+            mean_total_gas = 18.0
+            theoretical_gas_per_thread = [mean_total_gas / tc for tc in thread_counts]
+        
+        # Create gas per thread plot
+        gas_fig = go.Figure()
+        
+        # State-diff confidence interval
+        gas_fig.add_trace(
+            go.Scatter(
+                x=thread_counts + thread_counts[::-1],
+                y=state_diff_gas_percentile_75 + state_diff_gas_percentile_25[::-1],
+                fill='toself',
+                fillcolor=f'rgba(255, 127, 14, 0.2)',
+                line=dict(color='rgba(255,255,255,0)'),
+                showlegend=True,
+                name='25th-75th Percentile',
+                hoverinfo='skip'
+            )
+        )
+        
+        # State-diff mean line
+        gas_fig.add_trace(
+            go.Scatter(
+                x=thread_counts,
+                y=state_diff_gas_means,
+                mode='lines+markers',
+                name='Mean Gas per Thread',
+                line=dict(color='#ff7f0e', width=4),
+                marker=dict(size=8),
+                hovertemplate='<b>State-Diff Mean</b><br>' +
+                            'Virtual Cores: %{x}<br>' +
+                            'Gas: %{y:.1f}M<br>' +
+                            '<extra></extra>'
+            )
+        )
+        
+        # Theoretical perfect distribution line
+        gas_fig.add_trace(
+            go.Scatter(
+                x=thread_counts,
+                y=theoretical_gas_per_thread,
+                mode='lines',
+                name='Theoretical Perfect Distribution',
+                line=dict(color='#1f77b4', width=3, dash='dot'),
+                hovertemplate='<b>Theoretical Perfect</b><br>' +
+                            'Virtual Cores: %{x}<br>' +
+                            'Gas: %{y:.1f}M<br>' +
+                            f'Based on {mean_total_gas:.1f}M mean total gas<br>' +
+                            '<extra></extra>'
+            )
+        )
+        
+        gas_fig.update_layout(
+            title=dict(
+                text=f"Gas per Thread - state-diff parallelization over {successful_blocks} blocks",
+                x=0.5,
+                font=dict(size=18)
+            ),
+            xaxis=dict(
+                title="Number of Virtual Cores (k)",
+                title_font=dict(size=14),
+                tickfont=dict(size=12),
+                showgrid=True,
+                gridcolor='lightgray'
+            ),
+            yaxis=dict(
+                title="Gas per Thread (Millions)",
+                title_font=dict(size=14),
+                tickfont=dict(size=12),
+                showgrid=True,
+                gridcolor='lightgray'
+            ),
+            height=600,
+            width=1000,
+            plot_bgcolor='white',
+            paper_bgcolor='white',
+            legend=dict(
+                orientation="h",
+                yanchor="bottom",
+                y=-0.20,  # Move legend further down
+                xanchor="center",
+                x=0.5
+            ),
+            margin=dict(b=120)  # Increase bottom margin for more space
+        )
+        
+        # Create speedup plot
+        speedup_fig = go.Figure()
+        
+        # State-diff confidence interval
+        speedup_fig.add_trace(
+            go.Scatter(
+                x=thread_counts + thread_counts[::-1],
+                y=state_diff_speedup_percentile_75 + state_diff_speedup_percentile_25[::-1],
+                fill='toself',
+                fillcolor=f'rgba(255, 127, 14, 0.2)',
+                line=dict(color='rgba(255,255,255,0)'),
+                showlegend=True,
+                name='25th-75th Percentile',
+                hoverinfo='skip'
+            )
+        )
+        
+        # State-diff mean speedup
+        speedup_fig.add_trace(
+            go.Scatter(
+                x=thread_counts,
+                y=state_diff_speedup_means,
+                mode='lines+markers',
+                name='Mean Speedup',
+                line=dict(color='#ff7f0e', width=4),
+                marker=dict(size=8),
+                hovertemplate='<b>State-Diff Speedup</b><br>' +
+                            'Virtual Cores: %{x}<br>' +
+                            'Speedup: %{y:.2f}x<br>' +
+                            '<extra></extra>'
+            )
+        )
+        
+        # Minimum speedup
+        speedup_fig.add_trace(
+            go.Scatter(
+                x=thread_counts,
+                y=state_diff_speedup_mins,
+                mode='lines+markers',
+                name='Minimum Speedup',
+                line=dict(color='#d62728', width=3, dash='dot'),  # Red dashed line
+                marker=dict(size=6, symbol='triangle-down'),
+                hovertemplate='<b>Minimum Speedup</b><br>' +
+                            'Virtual Cores: %{x}<br>' +
+                            'Speedup: %{y:.2f}x<br>' +
+                            '<extra></extra>'
+            )
+        )
+        
+        # Theoretical perfect linear speedup (y = x)
+        speedup_fig.add_trace(
+            go.Scatter(
+                x=thread_counts,
+                y=thread_counts,
+                mode='lines',
+                name='Theoretical Linear Speedup',
+                line=dict(color='#1f77b4', width=3, dash='dot'),
+                hovertemplate='<b>Theoretical Perfect</b><br>' +
+                            'Virtual Cores: %{x}<br>' +
+                            'Speedup: %{y:.2f}x<br>' +
+                            'Perfect linear scaling<br>' +
+                            '<extra></extra>'
+            )
+        )
+        
+        speedup_fig.update_layout(
+            title=dict(
+                text=f"Speedup - state-diff parallelization over {successful_blocks} blocks",
+                x=0.5,
+                font=dict(size=18)
+            ),
+            xaxis=dict(
+                title="Number of Virtual Cores (k)",
+                title_font=dict(size=14),
+                tickfont=dict(size=12),
+                showgrid=True,
+                gridcolor='lightgray'
+            ),
+            yaxis=dict(
+                title="Speedup (x)",
+                title_font=dict(size=14),
+                tickfont=dict(size=12),
+                showgrid=True,
+                gridcolor='lightgray'
+            ),
+            height=600,
+            width=1000,
+            plot_bgcolor='white',
+            paper_bgcolor='white',
+            legend=dict(
+                orientation="h",
+                yanchor="bottom",
+                y=-0.20,  # Move legend further down
+                xanchor="center",
+                x=0.5
+            ),
+            margin=dict(b=120)  # Increase bottom margin for more space
+        )
+        
+        # Save plots
+        gas_filename = f"state_diff_gas_per_thread_{successful_blocks}_blocks.html"
+        gas_filepath = self.output_dir / gas_filename
+        gas_fig.write_html(str(gas_filepath), include_plotlyjs=True, config={'displayModeBar': True, 'displaylogo': False})
+        
+        speedup_filename = f"state_diff_speedup_{successful_blocks}_blocks.html"
+        speedup_filepath = self.output_dir / speedup_filename
+        speedup_fig.write_html(str(speedup_filepath), include_plotlyjs=True, config={'displayModeBar': True, 'displaylogo': False})
+        
+        self.logger.info(f"State-diff only analysis saved:")
+        self.logger.info(f"  Gas per Thread: {gas_filepath}")
+        self.logger.info(f"  Speedup Analysis: {speedup_filepath}")
+        
+        # Return the primary gas plot path
+        return str(gas_filepath) 
