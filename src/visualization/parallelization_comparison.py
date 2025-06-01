@@ -688,13 +688,29 @@ class ParallelizationComparisonVisualizer:
             )
         )
         
-        # State-diff mean speedup
+        # Segregated state mean speedup (green line for green confidence band)
+        speedup_fig.add_trace(
+            go.Scatter(
+                x=thread_counts,
+                y=speedup_means,
+                mode='lines+markers',
+                name='Segregated State Mean Speedup',
+                line=dict(color='#2ca02c', width=4),  # Green to match the confidence band
+                marker=dict(size=8),
+                hovertemplate='<b>Segregated State Speedup</b><br>' +
+                            'Virtual Cores: %{x}<br>' +
+                            'Speedup: %{y:.2f}x<br>' +
+                            '<extra></extra>'
+            )
+        )
+        
+        # State-diff mean speedup (orange line)
         speedup_fig.add_trace(
             go.Scatter(
                 x=thread_counts,
                 y=state_diff_speedup_means,
                 mode='lines+markers',
-                name='Mean Speedup',
+                name='State-Diff Mean Speedup',
                 line=dict(color='#ff7f0e', width=4),
                 marker=dict(size=8),
                 hovertemplate='<b>State-Diff Speedup</b><br>' +
@@ -736,22 +752,6 @@ class ParallelizationComparisonVisualizer:
             )
         )
         
-        # State-diff approach speedup line
-        speedup_fig.add_trace(
-            go.Scatter(
-                x=thread_counts,
-                y=state_diff_speedup_means,
-                mode='lines+markers',
-                name='Speedup with State-Diffs',
-                line=dict(color='#ff7f0e', width=3, dash='dash'),  # Orange dashed line
-                marker=dict(size=6, symbol='diamond'),
-                hovertemplate='<b>State-Diff Speedup</b><br>' +
-                            'Virtual Cores: %{x}<br>' +
-                            'Speedup: %{y:.2f}x<br>' +
-                            '<extra></extra>'
-            )
-        )
-        
         speedup_fig.update_layout(
             title=dict(
                 text=f"Speedup - simulated parallelization over {successful_blocks} blocks",
@@ -779,11 +779,12 @@ class ParallelizationComparisonVisualizer:
             legend=dict(
                 orientation="h",
                 yanchor="bottom",
-                y=-0.20,  # Move legend further down
+                y=-0.25,  # Move legend even further down
                 xanchor="center",
-                x=0.5
+                x=0.5,
+                font=dict(size=11)  # Slightly smaller font
             ),
-            margin=dict(b=120)  # Increase bottom margin for more space
+            margin=dict(b=140)  # Increase bottom margin even more for legend space
         )
         
         # Save speedup plot
@@ -1425,13 +1426,29 @@ class ParallelizationComparisonVisualizer:
             )
         )
         
-        # State-diff mean speedup
+        # Segregated state mean speedup (green line for green confidence band)
+        speedup_fig.add_trace(
+            go.Scatter(
+                x=thread_counts,
+                y=speedup_means,
+                mode='lines+markers',
+                name='Segregated State Mean Speedup',
+                line=dict(color='#2ca02c', width=4),  # Green to match the confidence band
+                marker=dict(size=8),
+                hovertemplate='<b>Segregated State Speedup</b><br>' +
+                            'Virtual Cores: %{x}<br>' +
+                            'Speedup: %{y:.2f}x<br>' +
+                            '<extra></extra>'
+            )
+        )
+        
+        # State-diff mean speedup (orange line)
         speedup_fig.add_trace(
             go.Scatter(
                 x=thread_counts,
                 y=state_diff_speedup_means,
                 mode='lines+markers',
-                name='Mean Speedup',
+                name='State-Diff Mean Speedup',
                 line=dict(color='#ff7f0e', width=4),
                 marker=dict(size=8),
                 hovertemplate='<b>State-Diff Speedup</b><br>' +
@@ -1475,7 +1492,7 @@ class ParallelizationComparisonVisualizer:
         
         speedup_fig.update_layout(
             title=dict(
-                text=f"Speedup - state-diff parallelization over {successful_blocks} blocks",
+                text=f"Speedup - simulated parallelization over {successful_blocks} blocks",
                 x=0.5,
                 font=dict(size=18)
             ),
@@ -1500,11 +1517,12 @@ class ParallelizationComparisonVisualizer:
             legend=dict(
                 orientation="h",
                 yanchor="bottom",
-                y=-0.20,  # Move legend further down
+                y=-0.25,  # Move legend even further down
                 xanchor="center",
-                x=0.5
+                x=0.5,
+                font=dict(size=11)  # Slightly smaller font
             ),
-            margin=dict(b=120)  # Increase bottom margin for more space
+            margin=dict(b=140)  # Increase bottom margin even more for legend space
         )
         
         # Save plots

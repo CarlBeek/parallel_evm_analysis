@@ -797,9 +797,48 @@ class DependencyGraphVisualizer:
             ordered_transactions = []
             processed = set()
             
-            # Helper function to add transaction and its immediate dependents
-            def add_transaction_with_dependents(tx_hash, depth=0):
+            # First, identify all dependency chains and calculate their total gas
+            def find_chain_components():
+                # Build a graph of dependencies to find connected components
+                import networkx as nx
+                dep_graph = nx.DiGraph()
+                
+                # Add all transactions as nodes
+                for tx in transactions:
+                    dep_graph.add_node(tx['hash'], gas_used=tx['gas_used'] or 0)
+                
+                # Add dependency edges
+                for dep in dependencies:
+                    dependent = dep['dependent_tx_hash']
+                    dependency = dep['dependency_tx_hash']
+                    if dependent in tx_lookup and dependency in tx_lookup:
+                        dep_graph.add_edge(dependency, dependent)
+                
+                # Find weakly connected components (chains)
+                components = list(nx.weakly_connected_components(dep_graph))
+                
+                # Calculate total gas for each component and sort by gas
+                component_gas = []
+                for component in components:
+                    total_gas = sum(tx_lookup[tx_hash]['gas_used'] or 0 for tx_hash in component if tx_hash in tx_lookup)
+                    max_gas = max((tx_lookup[tx_hash]['gas_used'] or 0 for tx_hash in component if tx_hash in tx_lookup), default=0)
+                    component_gas.append((total_gas, max_gas, component))
+                
+                # Sort by total gas (descending), then by max gas (descending)
+                component_gas.sort(key=lambda x: (x[0], x[1]), reverse=True)
+                
+                return [comp[2] for comp in component_gas]
+            
+            # Get dependency chains sorted by gas
+            gas_sorted_chains = find_chain_components()
+            
+            # Helper function to add transaction and its immediate dependents within a chain
+            def add_transaction_with_dependents(tx_hash, depth=0, chain_transactions=None):
                 if tx_hash in processed or tx_hash not in tx_lookup:
+                    return
+                
+                # Only process if this transaction is part of the current chain
+                if chain_transactions is not None and tx_hash not in chain_transactions:
                     return
                 
                 tx = tx_lookup[tx_hash]
@@ -815,33 +854,68 @@ class DependencyGraphVisualizer:
                 # Immediately add all transactions that depend directly on this one
                 if tx_hash in reverse_dependency_map:
                     dependents = reverse_dependency_map[tx_hash]
-                    # Sort dependents by their transaction index for consistent ordering
-                    dependents.sort(key=lambda dep_hash: tx_lookup[dep_hash]['transaction_index'])
+                    # Sort dependents by their gas usage (descending), then by transaction index
+                    dependents.sort(key=lambda dep_hash: (
+                        -(tx_lookup[dep_hash]['gas_used'] or 0),
+                        tx_lookup[dep_hash]['transaction_index']
+                    ))
                     for dependent_hash in dependents:
-                        if dependent_hash not in processed:
-                            add_transaction_with_dependents(dependent_hash, depth + 1)
+                        if dependent_hash not in processed and (chain_transactions is None or dependent_hash in chain_transactions):
+                            add_transaction_with_dependents(dependent_hash, depth + 1, chain_transactions)
             
-            # Start with all transactions, but process dependency chains together
-            all_tx_hashes = [tx['hash'] for tx in transactions]
+            # Process each chain in gas-sorted order
+            for chain in gas_sorted_chains:
+                chain_tx_hashes = [tx_hash for tx_hash in chain if tx_hash in tx_lookup]
+                
+                if not chain_tx_hashes:
+                    continue
+                
+                # Find root transactions in this chain (no dependencies within the chain)
+                chain_roots = []
+                for tx_hash in chain_tx_hashes:
+                    if tx_hash not in dependency_map or not any(dep in chain for dep in dependency_map[tx_hash]):
+                        chain_roots.append(tx_hash)
+                
+                # If no clear roots, start with the transaction with highest gas
+                if not chain_roots:
+                    chain_roots = [max(chain_tx_hashes, key=lambda x: tx_lookup[x]['gas_used'] or 0)]
+                
+                # Sort roots by gas usage (descending)
+                chain_roots.sort(key=lambda tx_hash: -(tx_lookup[tx_hash]['gas_used'] or 0))
+                
+                # Process each root and its dependents within this chain
+                for root_hash in chain_roots:
+                    if root_hash not in processed:
+                        add_transaction_with_dependents(root_hash, 0, set(chain))
+                
+                # Add any remaining unprocessed transactions from this chain
+                remaining_in_chain = [tx_hash for tx_hash in chain_tx_hashes if tx_hash not in processed]
+                remaining_in_chain.sort(key=lambda tx_hash: (
+                    -(tx_lookup[tx_hash]['gas_used'] or 0),
+                    execution_schedule.get(tx_hash, 0),
+                    tx_lookup[tx_hash]['transaction_index']
+                ))
+                
+                for tx_hash in remaining_in_chain:
+                    if tx_hash not in processed:
+                        add_transaction_with_dependents(tx_hash, 0, set(chain))
             
-            # Sort by execution time first, then by transaction index
-            all_tx_hashes.sort(key=lambda tx_hash: (
-                execution_schedule.get(tx_hash, 0),
+            # Add any remaining independent transactions, sorted by gas
+            remaining_independent = [tx['hash'] for tx in transactions if tx['hash'] not in processed]
+            remaining_independent.sort(key=lambda tx_hash: (
+                -(tx_lookup[tx_hash]['gas_used'] or 0),
                 tx_lookup[tx_hash]['transaction_index']
             ))
             
-            # Process each transaction and its dependency chain
-            for tx_hash in all_tx_hashes:
+            for tx_hash in remaining_independent:
                 if tx_hash not in processed:
-                    # Only start chains from transactions that don't depend on others
-                    # or from unprocessed transactions
-                    if tx_hash not in dependency_map or all(dep in processed for dep in dependency_map.get(tx_hash, [])):
-                        add_transaction_with_dependents(tx_hash)
-            
-            # Add any remaining unprocessed transactions
-            for tx_hash in all_tx_hashes:
-                if tx_hash not in processed:
-                    add_transaction_with_dependents(tx_hash)
+                    tx = tx_lookup[tx_hash]
+                    ordered_transactions.append({
+                        'transaction': tx,
+                        'depth': 0,
+                        'execution_time': execution_schedule.get(tx_hash, 0)
+                    })
+                    processed.add(tx_hash)
             
             return ordered_transactions
         
@@ -950,9 +1024,28 @@ class DependencyGraphVisualizer:
             xaxis_title='Gas Used (Duration)',
             yaxis_title='Transactions',
             barmode='overlay',
-            height=max(600, len(transactions) * 20),
+            height=max(300, len(transactions) * 6),  # Further reduced: min 300px, 6px per transaction
             width=1200,
             showlegend=True,
+            margin=dict(l=100, r=50, t=80, b=50),  # Tighter margins
+            bargap=0.1,  # Reduce gap between bars for more compact layout
+            yaxis=dict(
+                categoryorder="array",
+                categoryarray=[item['Task'] for item in reversed(gantt_data)],  # Reverse for top-down
+                tickfont=dict(size=10),  # Smaller font
+                showgrid=False,  # Remove grid lines for cleaner look
+                zeroline=False,
+                tickmode='linear',
+                dtick=1  # Show every transaction tick but more compact
+            ),
+            xaxis=dict(
+                showgrid=True,
+                gridcolor='lightgray',
+                gridwidth=1,
+                tickfont=dict(size=11)
+            ),
+            plot_bgcolor='white',
+            paper_bgcolor='white'
         )
         
         # Add analysis annotation

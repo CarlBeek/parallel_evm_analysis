@@ -2007,6 +2007,97 @@ def analyze_gas_cdf(output_dir='./data/graphs', max_gas=None, sample_points=1000
             gas_values_sampled = sorted_gas
             cumulative_percentages_sampled = cumulative_percentages_true
         
+        # Create dependency chain CDF data
+        print(f"🔗 Computing dependency chain CDF...")
+        
+        # Get all dependencies to build chains
+        try:
+            cursor.execute("""
+                SELECT dependent_tx_hash, dependency_tx_hash, gas_impact,
+                       t1.gas_used as dependent_gas, t2.gas_used as dependency_gas,
+                       t1.block_number
+                FROM transaction_dependencies d
+                LEFT JOIN transactions t1 ON d.dependent_tx_hash = t1.hash
+                LEFT JOIN transactions t2 ON d.dependency_tx_hash = t2.hash
+                WHERE t1.gas_used IS NOT NULL AND t2.gas_used IS NOT NULL
+                AND t1.gas_used > 0 AND t2.gas_used > 0
+            """)
+            
+            dependency_data = cursor.fetchall()
+            
+            if not dependency_data:
+                print("   No dependencies found in database")
+                chain_gas_values = []
+                chain_components = []
+                chain_gas_sampled = np.array([])
+                chain_cumulative_sampled = np.array([])
+            else:
+                # Build dependency chains using NetworkX
+                import networkx as nx
+                chain_graph = nx.DiGraph()
+                
+                # Get all transactions with gas data
+                cursor.execute("""
+                    SELECT hash, gas_used, block_number
+                    FROM transactions
+                    WHERE gas_used IS NOT NULL AND gas_used > 0
+                """)
+                all_tx_data = cursor.fetchall()
+                
+                # Add all transactions as nodes
+                tx_gas_map = {}
+                for tx_hash, gas_used, block_number in all_tx_data:
+                    chain_graph.add_node(tx_hash, gas_used=gas_used, block_number=block_number)
+                    tx_gas_map[tx_hash] = gas_used
+                
+                # Add dependency edges
+                for dep_hash, dependency_hash, gas_impact, dep_gas, dependency_gas, block_num in dependency_data:
+                    if dep_hash in chain_graph.nodes and dependency_hash in chain_graph.nodes:
+                        chain_graph.add_edge(dependency_hash, dep_hash, gas_impact=gas_impact)
+                
+                # Find connected components (dependency chains)
+                chain_components = list(nx.weakly_connected_components(chain_graph))
+                
+                # Calculate total gas for each chain
+                chain_gas_values = []
+                for component in chain_components:
+                    total_chain_gas = sum(tx_gas_map.get(tx_hash, 0) for tx_hash in component)
+                    if total_chain_gas > 0:
+                        chain_gas_values.append(total_chain_gas)
+                
+                # Sort chain gas values for CDF
+                sorted_chain_gas = np.array(sorted(chain_gas_values))
+                
+                # Create cumulative percentages for chain CDF
+                if len(sorted_chain_gas) > 0:
+                    n_chains = len(sorted_chain_gas)
+                    chain_cumulative_percentages = np.arange(1, n_chains + 1) / n_chains * 100
+                    
+                    # Sample chain points if needed
+                    if len(sorted_chain_gas) > sample_points:
+                        chain_sample_indices = np.linspace(0, len(sorted_chain_gas) - 1, sample_points, dtype=int)
+                        chain_gas_sampled = sorted_chain_gas[chain_sample_indices]
+                        chain_cumulative_sampled = chain_cumulative_percentages[chain_sample_indices]
+                    else:
+                        chain_gas_sampled = sorted_chain_gas
+                        chain_cumulative_sampled = chain_cumulative_percentages
+                    
+                    print(f"   Found {len(chain_components):,} dependency chains")
+                    print(f"   Chain gas range: {min(chain_gas_values):,} to {max(chain_gas_values):,}")
+                    print(f"   Median chain gas: {sorted(chain_gas_values)[len(chain_gas_values)//2]:,}")
+                else:
+                    chain_gas_sampled = np.array([])
+                    chain_cumulative_sampled = np.array([])
+                    print("   No dependency chains found")
+        
+        except Exception as e:
+            print(f"   Dependencies table not found or error accessing it: {e}")
+            print("   Falling back to individual transaction analysis only")
+            chain_gas_values = []
+            chain_components = []
+            chain_gas_sampled = np.array([])
+            chain_cumulative_sampled = np.array([])
+        
         # Create the plot
         print(f"🎨 Creating CDF visualization...")
         
@@ -2022,16 +2113,34 @@ def analyze_gas_cdf(output_dir='./data/graphs', max_gas=None, sample_points=1000
                 x=gas_values_sampled,
                 y=cumulative_percentages_sampled,
                 mode='lines',
-                name='Transaction Gas CDF',
+                name='Individual Transactions',
                 line=dict(color='blue', width=3),
                 customdata=np.arange(1, len(gas_values_sampled) + 1),
-                hovertemplate='<b>Gas Usage CDF</b><br>' +
+                hovertemplate='<b>Individual Transaction Gas CDF</b><br>' +
                             'Gas Threshold: %{x:,}<br>' +
                             'Transactions Below: %{y:.1f}%<br>' +
                             'Count: %{customdata:,}<br>' +
                             '<extra></extra>'
             )
         )
+        
+        # Add dependency chain CDF line
+        if len(chain_gas_sampled) > 0:
+            full_fig.add_trace(
+                go.Scatter(
+                    x=chain_gas_sampled,
+                    y=chain_cumulative_sampled,
+                    mode='lines',
+                    name='Dependency Chains',
+                    line=dict(color='red', width=3, dash='dash'),
+                    customdata=np.arange(1, len(chain_gas_sampled) + 1),
+                    hovertemplate='<b>Dependency Chain Gas CDF</b><br>' +
+                                'Gas Threshold: %{x:,}<br>' +
+                                'Chains Below: %{y:.1f}%<br>' +
+                                'Count: %{customdata:,}<br>' +
+                                '<extra></extra>'
+                )
+            )
         
         # Add key percentile lines
         percentiles = [50, 75, 90, 95, 99]
@@ -2050,15 +2159,29 @@ def analyze_gas_cdf(output_dir='./data/graphs', max_gas=None, sample_points=1000
         mean_gas = np.mean(gas_values)
         median_gas = np.median(gas_values)
         
+        # Calculate chain statistics
+        if len(chain_gas_values) > 0:
+            mean_chain_gas = np.mean(chain_gas_values)
+            median_chain_gas = np.median(chain_gas_values)
+            chain_stats_text = f"<br><br>📊 Chain Statistics<br>" + \
+                              f"Total Chains: {len(chain_gas_values):,}<br>" + \
+                              f"Mean Chain: {mean_chain_gas:,.0f} gas<br>" + \
+                              f"Median Chain: {median_chain_gas:,.0f} gas<br>" + \
+                              f"Max Chain: {max(chain_gas_values):,} gas"
+        else:
+            chain_stats_text = "<br><br>📊 Chain Statistics<br>No dependency chains found"
+        
         full_fig.add_annotation(
-            text=f"📊 Gas Usage Statistics<br>" +
+            text=f"📊 Individual Transaction Stats<br>" +
                  f"Total Transactions: {len(gas_values):,}<br>" +
                  f"Mean: {mean_gas:,.0f} gas<br>" +
                  f"Median: {median_gas:,.0f} gas<br>" +
                  f"Max: {max(gas_values):,} gas<br>" +
-                 f"Range: 0 to {max_gas:,} gas",
+                 f"Range: 0 to {max_gas:,} gas" +
+                 chain_stats_text,
             xref="paper", yref="paper",
-            x=0.02, y=0.02,
+            x=0.98, y=0.02,
+            xanchor='right', yanchor='bottom',
             showarrow=False,
             bgcolor="rgba(255,255,255,0.9)",
             bordercolor="gray",
@@ -2073,8 +2196,8 @@ def analyze_gas_cdf(output_dir='./data/graphs', max_gas=None, sample_points=1000
         
         full_fig.update_layout(
             title=dict(
-                text=f"Transaction Gas Usage Distribution (CDF){title_suffix}<br>" +
-                     f"<sub>{len(gas_values):,} transactions across {total_blocks:,} blocks</sub>",
+                text=f"Transaction & Dependency Chain Gas Distribution (CDF){title_suffix}<br>" +
+                     f"<sub>{len(gas_values):,} transactions, {len(chain_gas_values):,} dependency chains across {total_blocks:,} blocks</sub>",
                 x=0.5,
                 font=dict(size=18)
             ),
@@ -2255,6 +2378,7 @@ def analyze_gas_cdf(output_dir='./data/graphs', max_gas=None, sample_points=1000
         small_tx_threshold = 100000  # 100k gas
         medium_tx_threshold = 500000  # 500k gas
         large_tx_threshold = 1000000  # 1M gas
+        huge_tx_threshold = 10000000  # 10M gas
         
         small_tx_count = len([g for g in gas_values if g <= small_tx_threshold])
         medium_tx_count = len([g for g in gas_values if small_tx_threshold < g <= medium_tx_threshold])
@@ -2266,6 +2390,40 @@ def analyze_gas_cdf(output_dir='./data/graphs', max_gas=None, sample_points=1000
         print(f"   Medium ({small_tx_threshold:,}-{medium_tx_threshold:,}): {medium_tx_count:,} ({medium_tx_count/len(gas_values)*100:.1f}%)")
         print(f"   Large ({medium_tx_threshold:,}-{large_tx_threshold:,}): {large_tx_count:,} ({large_tx_count/len(gas_values)*100:.1f}%)")
         print(f"   Huge (>{large_tx_threshold:,}): {huge_tx_count:,} ({huge_tx_count/len(gas_values)*100:.1f}%)")
+        
+        # Add chain-specific insights
+        if len(chain_gas_values) > 0:
+            # Calculate chain percentiles
+            chain_percentiles = [50, 75, 90, 95, 99]
+            chain_percentile_values = np.percentile(chain_gas_values, chain_percentiles)
+            
+            print(f"\n🔗 Dependency Chain Analysis:")
+            print(f"   50% of chains use ≤ {chain_percentile_values[0]:,.0f} gas")
+            print(f"   75% of chains use ≤ {chain_percentile_values[1]:,.0f} gas")
+            print(f"   90% of chains use ≤ {chain_percentile_values[2]:,.0f} gas")
+            print(f"   95% of chains use ≤ {chain_percentile_values[3]:,.0f} gas")
+            print(f"   99% of chains use ≤ {chain_percentile_values[4]:,.0f} gas")
+            
+            # Compare chain vs individual transaction medians
+            individual_median = sorted(gas_values)[len(gas_values)//2]
+            chain_median = sorted(chain_gas_values)[len(chain_gas_values)//2]
+            median_multiplier = chain_median / individual_median if individual_median > 0 else 0
+            
+            print(f"\n💡 Chain vs Individual Comparison:")
+            print(f"   Individual median: {individual_median:,} gas")
+            print(f"   Chain median: {chain_median:,} gas")
+            print(f"   Chains are {median_multiplier:.1f}x larger on average")
+            
+            # Chain size distribution
+            single_tx_chains = len([c for c in chain_components if len(c) == 1])
+            multi_tx_chains = len(chain_components) - single_tx_chains
+            if multi_tx_chains > 0:
+                avg_chain_size = sum(len(c) for c in chain_components if len(c) > 1) / multi_tx_chains
+                print(f"   Single-transaction chains: {single_tx_chains:,}")
+                print(f"   Multi-transaction chains: {multi_tx_chains:,} (avg {avg_chain_size:.1f} txs)")
+        else:
+            print(f"\n🔗 Dependency Chain Analysis:")
+            print(f"   No dependency chains found - all transactions are independent")
         
         print(f"\n✅ Gas CDF analysis complete!")
         return 0
